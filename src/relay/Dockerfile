@@ -11,7 +11,7 @@ COPY . .
 # 改行はgofmt/ビルドに影響しないためそのままでよい。
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/relay .
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/relay /relay
 

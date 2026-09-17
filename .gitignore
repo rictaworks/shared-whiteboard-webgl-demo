@@ -40,6 +40,9 @@ src/backend/vendor/bundle_wsl/
 src/backend/.bundle/
 src/backend/db/*.sqlite3
 src/backend/db/*.sqlite3-*
+# 本番のSQLiteパスはdb/ではなくstorage/（永続化ボリュームがdb/migrate/を隠さないため）。
+src/backend/storage/*.sqlite3
+src/backend/storage/*.sqlite3-*
 src/backend/log/*
 src/backend/tmp/*
 !src/backend/log/.keep
