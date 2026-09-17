@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>{{{ PRODUCT_NAME }}}</title>
+  <meta name="color-scheme" content="light" />
+
+  <!--
+    本番デプロイ時にGo中継サーバー・Railsアプリケーション層のURLへ書き換える
+    （Unity PlayとRailwayはデプロイ先が異なるオリジンのため）。
+    空の場合はEnvBridge.jslibが同一オリジンの /ws・相対パスへフォールバックする。
+  -->
+  <meta name="wb-ws-url" content="" />
+  <meta name="wb-api-base" content="" />
+
+  <!-- Google Analytics 4 -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-C04W1XKS16"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-C04W1XKS16');
+  </script>
+
+  <script>
+    // NetBridge.jslib の fetch() が使う共通ベースURL。
+    (function () {
+      var meta = document.querySelector('meta[name="wb-api-base"]');
+      window.__wbApiBase = (meta && meta.content) ? meta.content : '';
+    })();
+  </script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --amber-bg: #fff3cd;
+      --amber-border: #ffe08a;
+      --amber-text: #7a5b00;
+      --header-bg: #ffffff;
+      --header-border: #e2e2e6;
+      --accent: #1e88e5;
+      --text: #1a1a1a;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f4f4f6;
+      color: var(--text);
+      font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+      overscroll-behavior: none;
+      height: 100%;
+      width: 100%;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    #wb-amber-banner {
+      background: var(--amber-bg);
+      border-bottom: 1px solid var(--amber-border);
+      color: var(--amber-text);
+      font-size: 13px;
+      text-align: center;
+      padding: 6px 12px;
+      line-height: 1.5;
+    }
+
+    #wb-header {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--header-border);
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+
+    #wb-header a {
+      color: var(--accent);
+      text-decoration: none;
+      padding-left: 12px;
+      border-left: 1px solid var(--header-border);
+    }
+
+    #wb-app {
+      position: relative;
+      width: 100%;
+      height: calc(100vh - 76px);
+      overflow: hidden;
+      background: #f4f4f6;
+      touch-action: none;
+    }
+
+    #unity-container {
+      position: absolute;
+      inset: 0;
+      touch-action: none;
+    }
+
+    #unity-canvas {
+      width: 100%;
+      height: 100%;
+      background: #f4f4f6;
+      touch-action: none;
+      display: block;
+    }
+
+    #unity-loading-bar {
+      position: absolute;
+      left: 0; right: 0; top: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #f4f4f6;
+    }
+
+    #unity-progress-bar-empty {
+      width: 60%;
+      max-width: 360px;
+      height: 8px;
+      background: #dcdcdc;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 16px;
+    }
+
+    #unity-progress-bar-full {
+      width: 0%;
+      height: 100%;
+      background: var(--accent);
+    }
+
+    #wb-unsupported {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+      background: #f4f4f6;
+    }
+
+    #wb-consult-button {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 999px;
+      padding: 12px 20px;
+      font-size: 14px;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      z-index: 50;
+    }
+
+    #wb-footer {
+      position: fixed;
+      bottom: 0.5rem;
+      left: 1rem;
+      font-size: 12px;
+      z-index: 50;
+    }
+
+    #wb-footer a {
+      color: #666;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div id="wb-amber-banner">これはデモ版です。データはサーバー再起動時にリセットされる場合があります。</div>
+  <div id="wb-header">
+    <a href="https://rictaworks.jp/#demos">← デモ一覧へ</a>
+  </div>
+
+  <div id="wb-app">
+    <div id="unity-container">
+      <canvas id="unity-canvas" tabindex="-1"></canvas>
+    </div>
+    <div id="unity-loading-bar">
+      <div id="unity-loading-message">読み込み中です…</div>
+      <div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div>
+    </div>
+    <div id="wb-unsupported">
+      <div>
+        <p>お使いのブラウザはWebGL 2.0に対応していないため、このデモを表示できません。</p>
+        <p>最新版のGoogle Chrome・Microsoft Edge・Firefoxのデスクトップ版でお試しください。</p>
+      </div>
+    </div>
+  </div>
+
+  <a id="wb-consult-button" href="https://rictaworks.jp/">ご相談はこちら</a>
+  <div id="wb-footer"><a href="legal.html">利用規約・免責事項・連絡先</a></div>
+
+  <script>
+    // requirements.md 30章：起動時にWebGL 2.0の可否を検出し、非対応の場合は起動せず
+    // その旨を表示する。Unityローダーの読み込み自体をここで止める。
+    function supportsWebGL2() {
+      try {
+        var canvas = document.createElement('canvas');
+        return !!(window.WebGLRenderingContext && canvas.getContext('webgl2'));
+      } catch (e) {
+        return false;
+      }
+    }
+
+    if (!supportsWebGL2()) {
+      document.getElementById('unity-loading-bar').style.display = 'none';
+      document.getElementById('wb-unsupported').style.display = 'flex';
+    } else {
+      var buildUrl = 'Build';
+      var loaderUrl = buildUrl + '/{{{ LOADER_FILENAME }}}';
+      var config = {
+        dataUrl: buildUrl + '/{{{ DATA_FILENAME }}}',
+        frameworkUrl: buildUrl + '/{{{ FRAMEWORK_FILENAME }}}',
+        codeUrl: buildUrl + '/{{{ CODE_FILENAME }}}',
+#if MEMORY_FILENAME
+        memoryUrl: buildUrl + '/{{{ MEMORY_FILENAME }}}',
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: buildUrl + '/{{{ SYMBOLS_FILENAME }}}',
+#endif
+        streamingAssetsUrl: 'StreamingAssets',
+        companyName: '{{{ COMPANY_NAME }}}',
+        productName: '{{{ PRODUCT_NAME }}}',
+        productVersion: '{{{ PRODUCT_VERSION }}}',
+      };
+
+      var container = document.getElementById('unity-container');
+      var canvas = document.getElementById('unity-canvas');
+      var loadingBar = document.getElementById('unity-loading-bar');
+      var progressBarFull = document.getElementById('unity-progress-bar-full');
+
+      var script = document.createElement('script');
+      script.src = loaderUrl;
+      script.onload = function () {
+        createUnityInstance(canvas, config, function (progress) {
+          progressBarFull.style.width = 100 * progress + '%';
+        }).then(function (unityInstance) {
+          loadingBar.style.display = 'none';
+          window.__wbUnityInstance = unityInstance;
+        }).catch(function (message) {
+          document.getElementById('unity-loading-message').innerText = '読み込みに失敗しました：' + message;
+        });
+      };
+      document.body.appendChild(script);
+    }
+  </script>
+</body>
+</html>

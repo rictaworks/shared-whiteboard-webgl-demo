@@ -32,6 +32,23 @@ ENV/
 .byebug_history
 /public/assets
 
+# --- Rails（src/backend。ルート直下ではなくネストしているため非アンカーで指定） ---
+src/backend/vendor/bundle/
+src/backend/.bundle/
+src/backend/db/*.sqlite3
+src/backend/db/*.sqlite3-*
+src/backend/log/*
+src/backend/tmp/*
+!src/backend/log/.keep
+!src/backend/tmp/.keep
+
+# 注意：上の「ノウハウ・非公開ディレクトリ」節の TASKS/ は非アンカーかつ
+# このファイルシステムでは大文字小文字を区別しないため、Rails標準の lib/tasks/
+# （rake task配置場所）まで意図せず無視してしまう。既存行は変更せず、
+# 追加の否定パターンでこのパスだけ復元する。
+!src/backend/lib/tasks/
+!src/backend/lib/tasks/*.rake
+
 # --- Node / Next.js / Vercel ---
 node_modules/
 .next/
