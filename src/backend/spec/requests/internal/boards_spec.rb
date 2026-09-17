@@ -57,6 +57,29 @@ RSpec.describe "Internal::Boards", type: :request do
       expect(BoardOp.count).to eq(0)
     end
 
+    it "バッチの中間に欠番がある場合も409 gap_detectedを返し、欠番より手前だけを確定する（reviewer修正の回帰テスト）" do
+      # last_seq=0の状態で [seq=1, seq=2, seq=4] が届く（seq=3が欠落）。
+      # バッチ先頭（min_seq=1）だけを見ていた旧実装ではここを検出できず、
+      # seq=4まで誤って確定してしまっていた。
+      ops = [
+        { op_id: "op-1", session_key: session.id, seq: 1, kind: "clear" },
+        { op_id: "op-2", session_key: session.id, seq: 2, kind: "clear" },
+        { op_id: "op-4", session_key: session.id, seq: 4, kind: "clear" }
+      ]
+
+      post "/internal/boards/#{board.id}/ops", params: { ops: ops }, headers: internal_headers, as: :json
+
+      expect(response).to have_http_status(:conflict)
+      body = JSON.parse(response.body)
+      expect(body["error"]).to eq("gap_detected")
+      expect(body["expected_from"]).to eq(3)
+
+      board.reload
+      expect(board.last_seq).to eq(2)
+      expect(BoardOp.where(board_id: board.id).pluck(:seq).sort).to eq([1, 2])
+      expect(BoardOp.exists?(op_id: "op-4")).to eq(false)
+    end
+
     it "stroke_eraseの対象が既に消去済みでもエラーにせず操作ログへ記録する" do
       erase1 = { op_id: "op-1", session_key: session.id, seq: 1, kind: "stroke_erase", target_stroke_ids: ["stroke-x"] }
       erase2 = { op_id: "op-2", session_key: session.id, seq: 2, kind: "stroke_erase", target_stroke_ids: ["stroke-x"] }

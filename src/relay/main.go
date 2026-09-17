@@ -63,7 +63,7 @@ func main() {
 	internal := router.Group("/internal", httpapi.RequireInternalSecret(cfg.InternalSecret))
 	internal.POST("/reset", httpapi.ResetHandler(manager))
 
-	addr := ":" + cfg.Port
+	addr := cfg.Host + ":" + cfg.Port
 	log.Printf("relay: listening on %s (app internal url: %s)", addr, cfg.AppInternalURL)
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("relay: server exited: %v", err)
