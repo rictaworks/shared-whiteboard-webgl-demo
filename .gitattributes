@@ -1,0 +1,6 @@
+# 自動判定されたテキストファイルはすべてLF
+* text=auto eol=lf
+
+# シバン行を持つ実行スクリプトは明示的にLF
+bin/* text eol=lf
+*.sh text eol=lf
