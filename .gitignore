@@ -34,6 +34,9 @@ ENV/
 
 # --- Rails（src/backend。ルート直下ではなくネストしているため非アンカーで指定） ---
 src/backend/vendor/bundle/
+# WSL側でbundle installした際の副産物（reviewerがWSLネイティブfsでテスト実行するために作成）。
+# Windows側リポジトリには不要（2026-09-18追記）。
+src/backend/vendor/bundle_wsl/
 src/backend/.bundle/
 src/backend/db/*.sqlite3
 src/backend/db/*.sqlite3-*

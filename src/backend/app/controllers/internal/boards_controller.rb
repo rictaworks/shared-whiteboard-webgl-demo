@@ -22,11 +22,24 @@ module Internal
 
       accepted = 0
       op_limit_hit = false
+      gap_detected = false
 
       ActiveRecord::Base.transaction do
         sorted.each do |raw_op|
           seq = raw_op[:seq].to_i
           next if seq <= board.last_seq # 連番の重複はスキップ（既に永続化済み＝冪等）
+
+          # レビュー修正：requirements.md 11.5章「アプリケーション層は連番の重複を拒否し、
+          # 欠番を検出した場合は該当範囲の再送を中継サーバーへ求めること」は、これまで
+          # バッチ先頭（min_seq）でしか検証されておらず、バッチの中間に欠番があっても
+          # そのまま連番を飛び越して書き込んでいた（例：last_seq=4のときseq=[5,6,8]が届くと、
+          # 7が永久に欠落したままlast_seq=8として確定してしまう）。中間の欠番を検出した場合は
+          # そこで処理を打ち切り、それまでの分だけ確定してgap_detectedを返す（中継サーバーは
+          # 直近バッファから該当範囲を再送する）。
+          if seq > board.last_seq + 1
+            gap_detected = true
+            break
+          end
 
           if board.op_count >= Board::MAX_OPS
             op_limit_hit = true
@@ -44,6 +57,7 @@ module Internal
         board.save!
       end
 
+      return render json: { error: "gap_detected", expected_from: board.last_seq + 1 }, status: :conflict if gap_detected
       return render json: { error: "op_limit_exceeded" }, status: :conflict if op_limit_hit && accepted.zero?
 
       render json: { accepted: accepted }, status: :ok
