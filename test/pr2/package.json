@@ -1,0 +1,9 @@
+{
+  "name": "shared-whiteboard-webgl-demo-pr2-tests",
+  "private": true,
+  "type": "module",
+  "description": "PR #2 のユーザーテスト手順に対応する結合E2Eテスト（Node.js組み込みのnode:testのみ使用、追加依存なし）",
+  "scripts": {
+    "test": "node --test"
+  }
+}
