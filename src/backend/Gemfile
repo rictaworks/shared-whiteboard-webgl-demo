@@ -1,0 +1,20 @@
+source "https://rubygems.org"
+ruby ">= 3.1"
+
+gem "rails", "~> 7.2"
+gem "sqlite3", "~> 1.7"
+gem "webrick"
+gem "rack-cors"
+
+# Windowsにはtzinfoが読むOS標準のzoneinfoが存在しないため、gem版データを積む。
+# config.time_zone = "Tokyo" の解決に必須（TZInfo::DataSources::ZoneinfoDirectoryNotFound対策）。
+gem "tzinfo-data", platforms: %i[windows jruby]
+
+group :development, :test do
+  gem "rspec-rails", "~> 6.1"
+  gem "factory_bot_rails"
+end
+
+group :test do
+  gem "webmock"
+end
