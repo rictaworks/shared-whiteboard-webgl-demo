@@ -13,4 +13,8 @@ test:
 
 production:
   <<: *default
-  database: db/production.sqlite3
+  # db/ 配下は migrate/ 等アプリケーションコードも置く場所であり、ここに
+  # 永続化ボリュームをマウントするとイメージ内のマイグレーションファイルが
+  # 隠れて db:prepare が「テーブル無し」のまま起動してしまう
+  # （本番デプロイ時に実際に踏んだ）。データファイルのみを持つ storage/ を使う。
+  database: storage/production.sqlite3
