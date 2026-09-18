@@ -79,13 +79,24 @@ namespace Whiteboard.EditorTools
 
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.WebGL, "jp.rictaworks.sharedwhiteboarddemo");
 
+            // 既定のStrip Engine Codeが有効だと、コードから動的にAddComponentする
+            // 型がIL2CPPの静的解析で「未使用」と誤判定され除去される
+            // （"Could not produce class with ID 115" で起動直後に停止する不具合を
+            // 実機で確認・修正）。
+            PlayerSettings.stripEngineCode = false;
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.WebGL, ManagedStrippingLevel.Disabled);
+
             // requirements.md 30章：WebGL 2.0対応ブラウザのみを対象とする。
             PlayerSettings.SetGraphicsAPIs(BuildTarget.WebGL, new[] { GraphicsDeviceType.OpenGLES3 });
 
             PlayerSettings.WebGL.template = "PROJECT:" + WebGLTemplateName;
             PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
             PlayerSettings.WebGL.decompressionFallback = true;
-            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
+            // ExplicitlyThrownExceptionsOnlyだと暗黙の実行時例外（NullReferenceException等）が
+            // ブラウザのコンソールに一切出ずに黙って止まる（本番デプロイ時に実際に発生し、
+            // 原因調査が長時間手詰まりになった）。サイズ・速度のトレードオフはあるが、
+            // デモ版は公開スピード優先のため、原因追跡可能な状態を優先しFullWithStacktraceにする。
+            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.FullWithStacktrace;
 
             // requirements.md 16章：解像度はブラウザウィンドウに追随する（固定解像度は使わない）。
             PlayerSettings.defaultScreenWidth = 1280;

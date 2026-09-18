@@ -238,6 +238,10 @@ namespace Whiteboard.Drawing
 
             var prev = RenderTexture.active;
             RenderTexture.active = rt;
+            // RenderTexture.active切替時にビューポートを明示しないと、直前にアクティブだった
+            // 描画先（画面解像度等）のビューポートが残ったままになり、RenderTextureの実サイズ
+            // と食い違ってメッシュが正しく描き込まれない（本番相当環境で実際に確認）。
+            GL.Viewport(new Rect(0, 0, rt.width, rt.height));
 
             GL.PushMatrix();
             Matrix4x4 proj = Matrix4x4.Ortho(-WorldHalfExtent.x, WorldHalfExtent.x, -WorldHalfExtent.y, WorldHalfExtent.y, -1f, 1f);
