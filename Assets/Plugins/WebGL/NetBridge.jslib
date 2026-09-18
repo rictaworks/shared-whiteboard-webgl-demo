@@ -89,27 +89,36 @@ mergeInto(LibraryManager.library, {
     }
   },
 
+  // C#へ文字列を返すjslib関数は、JSの文字列をそのままreturnしても正しく
+  // マーシャリングされない（IL2CPPはポインタを期待するため、素の文字列を
+  // アドレスとして誤読し空文字列になる。本番で実際に発生し診断済み）。
+  // Unity公式ドキュメントの malloc+stringToUTF8 パターンで明示的にヒープへ
+  // 書き込み、そのポインタを返す（クロスファンクション呼び出しはEmscripten
+  // の最適化で除去されるリスクがあるため、各箇所にインライン展開する）。
   WB_Net_Drain: function () {
     var state = window.__wbNet;
+    var result;
     if (!state) {
-      return '[]';
+      result = '[]';
+    } else {
+      // 切断通知も一種のメッセージとしてUnity側へ伝える。
+      var payload = state.recvBuffer.slice();
+      state.recvBuffer.length = 0;
+      var wrapped = [];
+      for (var i = 0; i < payload.length; i++) {
+        wrapped.push(payload[i]);
+      }
+      if (state.disconnectFlag) {
+        wrapped.push(JSON.stringify({ type: '__bridge_disconnected' }));
+        state.disconnectFlag = false;
+      }
+      // 各要素は既にJSON文字列なので、配列としてそのまま埋め込む。
+      result = wrapped.length === 0 ? '[]' : ('[' + wrapped.join(',') + ']');
     }
-    // 切断通知も一種のメッセージとしてUnity側へ伝える。
-    var payload = state.recvBuffer.slice();
-    state.recvBuffer.length = 0;
-    var wrapped = [];
-    for (var i = 0; i < payload.length; i++) {
-      wrapped.push(payload[i]);
-    }
-    if (state.disconnectFlag) {
-      wrapped.push(JSON.stringify({ type: '__bridge_disconnected' }));
-      state.disconnectFlag = false;
-    }
-    if (wrapped.length === 0) {
-      return '[]';
-    }
-    // 各要素は既にJSON文字列なので、配列としてそのまま埋め込む。
-    return '[' + wrapped.join(',') + ']';
+    var bufferSize = lengthBytesUTF8(result) + 1;
+    var buffer = _malloc(bufferSize);
+    stringToUTF8(result, buffer, bufferSize);
+    return buffer;
   },
 
   WB_Net_Overflowed: function () {
@@ -161,12 +170,17 @@ mergeInto(LibraryManager.library, {
 
   WB_Net_DrainResponses: function () {
     var state = window.__wbNet;
+    var json;
     if (!state || state.responses.length === 0) {
-      return '[]';
+      json = '[]';
+    } else {
+      json = JSON.stringify(state.responses);
+      state.responses.length = 0;
     }
-    var json = JSON.stringify(state.responses);
-    state.responses.length = 0;
-    return json;
+    var bufferSize = lengthBytesUTF8(json) + 1;
+    var buffer = _malloc(bufferSize);
+    stringToUTF8(json, buffer, bufferSize);
+    return buffer;
   },
 
   WB_Net_SendOnPageHide: function (jsonArrayPtr) {

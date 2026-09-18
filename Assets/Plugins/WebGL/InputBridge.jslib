@@ -40,12 +40,24 @@ mergeInto(LibraryManager.library, {
 
     function toCanvasCoords(ev) {
       var rect = canvas.getBoundingClientRect();
-      return [ev.clientX - rect.left, ev.clientY - rect.top];
+      // C#側は Screen.width/height（Unity内部の実解像度＝CSSピクセル×devicePixelRatio）を
+      // 基準にワールド座標変換する（Boot.cs の UpdateCameraFromController）。
+      // getBoundingClientRect はCSSピクセル単位を返すため、devicePixelRatio相当の
+      // 倍率（canvas.width / rect.width）を掛けて同じ基準に揃える
+      // （揃えないとdevicePixelRatio!=1の環境で描画位置が大きくずれる。本番相当環境で実際に確認）。
+      var scaleX = canvas.width / rect.width;
+      var scaleY = canvas.height / rect.height;
+      return [(ev.clientX - rect.left) * scaleX, (ev.clientY - rect.top) * scaleY];
     }
 
     function handlePointerEvent(type) {
       return function (ev) {
-        ev.preventDefault();
+        // pointerdownでpreventDefault()すると、ブラウザがmousedown/mouseupの
+        // 互換イベント合成を止めてしまい、EventSystem（StandaloneInputModule）が
+        // 一切クリックを検知できなくなる不具合を本番で確認した（UIボタンが
+        // 反応しない）。ジェスチャ抑止はtouch-action:none（既に設定済み・上記）と
+        // 個別のcontextmenu/dragstart/gesturestartのpreventDefaultで足りるため、
+        // ここでは呼ばない。
 
         // 1イベントに複数の座標が束ねられている場合（getCoalescedEvents）は
         // それらをすべて個別の点として追記する。
@@ -97,14 +109,24 @@ mergeInto(LibraryManager.library, {
     canvas.addEventListener('gesturestart', function (ev) { ev.preventDefault(); });
   },
 
+  // C#へ文字列を返すjslib関数は、JSの文字列をそのままreturnしても正しく
+  // マーシャリングされない（IL2CPPはポインタを期待するため、素の文字列を
+  // アドレスとして誤読し空文字列になる。本番で実際に発生し診断済み）。
+  // Unity公式ドキュメントの malloc+stringToUTF8 パターンで明示的にヒープへ
+  // 書き込み、そのポインタを返す。
   WB_Input_Drain: function () {
     var state = window.__wbInput;
+    var json;
     if (!state || state.buffer.length === 0) {
-      return '[]';
+      json = '[]';
+    } else {
+      json = JSON.stringify(state.buffer);
+      state.buffer.length = 0;
     }
-    var json = JSON.stringify(state.buffer);
-    state.buffer.length = 0;
-    return json;
+    var bufferSize = lengthBytesUTF8(json) + 1;
+    var buffer = _malloc(bufferSize);
+    stringToUTF8(json, buffer, bufferSize);
+    return buffer;
   },
 
   WB_Input_Capture: function (pointerId) {

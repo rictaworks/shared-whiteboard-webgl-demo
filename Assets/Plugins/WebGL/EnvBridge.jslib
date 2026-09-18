@@ -2,6 +2,11 @@
 // ページURLからのボードトークン読み取り、visibilitychange/pagehide通知、
 // PNGダウンロードを担う。
 mergeInto(LibraryManager.library, {
+  // C#へ文字列を返すjslib関数は、JSの文字列をそのままreturnしても正しく
+  // マーシャリングされない（IL2CPPはポインタを期待するため、素の文字列を
+  // アドレスとして誤読し空文字列になる。本番で実際に発生し診断済み）。
+  // Unity公式ドキュメントの malloc+stringToUTF8 パターンで明示的にヒープへ
+  // 書き込み、そのポインタを返す。
   WB_Env_BoardToken: function () {
     // 参加URLの構成要素。クエリ ?b=<token> を既定の形とする。
     // ロード完了前に読み取った値は保持し、失わないようにキャッシュする。
@@ -9,7 +14,11 @@ mergeInto(LibraryManager.library, {
       var params = new URLSearchParams(window.location.search);
       window.__wbBoardTokenCache = params.get('b') || '';
     }
-    return window.__wbBoardTokenCache;
+    var result = window.__wbBoardTokenCache;
+    var bufferSize = lengthBytesUTF8(result) + 1;
+    var buffer = _malloc(bufferSize);
+    stringToUTF8(result, buffer, bufferSize);
+    return buffer;
   },
 
   WB_Env_Init: function () {
@@ -31,23 +40,34 @@ mergeInto(LibraryManager.library, {
 
   WB_Env_Drain: function () {
     var state = window.__wbEnv;
+    var json;
     if (!state || state.events.length === 0) {
-      return '[]';
+      json = '[]';
+    } else {
+      json = JSON.stringify(state.events);
+      state.events.length = 0;
     }
-    var json = JSON.stringify(state.events);
-    state.events.length = 0;
-    return json;
+    var bufferSize = lengthBytesUTF8(json) + 1;
+    var buffer = _malloc(bufferSize);
+    stringToUTF8(json, buffer, bufferSize);
+    return buffer;
   },
 
   WB_Env_RelayWsUrl: function () {
     // 本番はindex.html側で <meta name="wb-ws-url" content="wss://..."> を設定する
     // （Unity PlayとGo中継サーバーはデプロイ先が異なるため、同一オリジンではない）。
     var meta = document.querySelector('meta[name="wb-ws-url"]');
+    var result;
     if (meta && meta.content) {
-      return meta.content;
+      result = meta.content;
+    } else {
+      var proto = (window.location.protocol === 'https:') ? 'wss:' : 'ws:';
+      result = proto + '//' + window.location.host + '/ws';
     }
-    var proto = (window.location.protocol === 'https:') ? 'wss:' : 'ws:';
-    return proto + '//' + window.location.host + '/ws';
+    var bufferSize = lengthBytesUTF8(result) + 1;
+    var buffer = _malloc(bufferSize);
+    stringToUTF8(result, buffer, bufferSize);
+    return buffer;
   },
 
   WB_Env_Download: function (bytesPtr, length, filenamePtr) {
