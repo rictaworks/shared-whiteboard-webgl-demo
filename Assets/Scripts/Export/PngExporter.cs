@@ -56,6 +56,10 @@ namespace Whiteboard.Export
             rt.Create();
             var prevActive = RenderTexture.active;
             RenderTexture.active = rt;
+            // RenderTexture.active切替時にビューポートを明示しないと、直前にアクティブだった
+            // 描画先のビューポートが残ったままになり、このRenderTextureの実サイズと食い違って
+            // 描き込まれる（LayerCompositor.DrawMeshIntoで確認した同型の不具合。PR #5レビューで指摘）。
+            GL.Viewport(new Rect(0, 0, width, height));
             GL.Clear(true, true, Color.white);
 
             EnsureMaterial();
