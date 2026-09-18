@@ -18,5 +18,9 @@ Rails.application.routes.draw do
     post "boards/:board_id/ops", to: "boards#create_ops"
     get "boards/:board_id/last_seq", to: "boards#last_seq"
     post "boards/:board_id/undo_flag", to: "boards#undo_flag"
+
+    # Issue #11：Go中継サーバーの契約(INTEGRATION_CONTRACT.md)には含まれない。
+    # Railway Cronサービスから日次リセットをトリガーするための専用エンドポイント。
+    post "system/daily_reset", to: "system#daily_reset"
   end
 end
