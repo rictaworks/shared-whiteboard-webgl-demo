@@ -154,7 +154,13 @@ mergeInto(LibraryManager.library, {
       headers['Content-Type'] = 'application/json';
     }
 
-    var base = window.__wbApiBase || '';
+    // Unity Playは配布用zip内のindex.htmlを使わず、独自のプレイヤーHTMLに
+    // Buildフォルダのファイルだけを読み込ませる。そのためwindow.__wbApiBaseを
+    // 設定するindex.html側のインラインスクリプトが実行されず、window.__wbApiBaseは
+    // 常に空文字列のままになる（本番で実際に発生し診断済み。issue #7）。
+    // ローカル開発（no_cache_server.py配信・index.htmlあり）ではmetaタグの値を、
+    // Unity Playではこのフォールバックの本番URLを使う。
+    var base = window.__wbApiBase || 'https://backend-production-e892c.up.railway.app';
     fetch(base + path, {
       method: method,
       headers: headers,

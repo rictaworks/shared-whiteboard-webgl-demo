@@ -56,13 +56,17 @@ mergeInto(LibraryManager.library, {
   WB_Env_RelayWsUrl: function () {
     // 本番はindex.html側で <meta name="wb-ws-url" content="wss://..."> を設定する
     // （Unity PlayとGo中継サーバーはデプロイ先が異なるため、同一オリジンではない）。
+    // ただしUnity Playは配布用zip内のindex.htmlを使わず独自のプレイヤーHTMLに
+    // Buildフォルダのファイルだけを読み込ませるため、このmetaタグは反映されない
+    // （本番で実際に発生し診断済み。issue #7）。同一オリジンへの相対フォールバックは
+    // Unity Play上では中継サーバーに到達できないため、本番の中継サーバーURLを
+    // 直接フォールバックとして使う。
     var meta = document.querySelector('meta[name="wb-ws-url"]');
     var result;
     if (meta && meta.content) {
       result = meta.content;
     } else {
-      var proto = (window.location.protocol === 'https:') ? 'wss:' : 'ws:';
-      result = proto + '//' + window.location.host + '/ws';
+      result = 'wss://relay-production-ff8d.up.railway.app/ws';
     }
     var bufferSize = lengthBytesUTF8(result) + 1;
     var buffer = _malloc(bufferSize);
