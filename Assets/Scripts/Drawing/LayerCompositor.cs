@@ -234,6 +234,13 @@ namespace Whiteboard.Drawing
             }
         }
 
+        // 表示用クアウド（Boot.CreateLayerQuad）はDefault layer(0)にいる。bakeカメラの
+        // cullingMaskをDefaultにすると、書き込み先のRenderTextureを貼っている表示用クアウド
+        // 自身がbakeカメラの視野に入り、同一RenderTextureを読みながら書く自己参照が起きる
+        // （PR #6レビューで指摘）。本プロジェクトはカスタムlayerを一切使っていないため、
+        // 未使用のlayer 8をbake専用として占有する。
+        private const int BakeOnlyLayer = 8;
+
         private void EnsureBakeCamera()
         {
             if (_bakeCamera != null)
@@ -241,7 +248,7 @@ namespace Whiteboard.Drawing
                 return;
             }
 
-            _bakeMeshGo = new GameObject("WhiteboardBakeMesh") { hideFlags = HideFlags.HideAndDontSave };
+            _bakeMeshGo = new GameObject("WhiteboardBakeMesh") { hideFlags = HideFlags.HideAndDontSave, layer = BakeOnlyLayer };
             _bakeMeshFilter = _bakeMeshGo.AddComponent<MeshFilter>();
             _bakeMeshRenderer = _bakeMeshGo.AddComponent<MeshRenderer>();
             _bakeMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -258,7 +265,7 @@ namespace Whiteboard.Drawing
             // 既存の焼き込み内容を消さずに、このメッシュだけを上乗せする
             // （元のGL実装もクリアはClearTexture側の責務としていたため、挙動を変えない）。
             _bakeCamera.clearFlags = CameraClearFlags.Nothing;
-            _bakeCamera.cullingMask = 1; // Default layerのみ（他のゲーム内オブジェクトと混在しない専用構成）。
+            _bakeCamera.cullingMask = 1 << BakeOnlyLayer;
             camGo.transform.position = new Vector3(0f, 0f, -1f);
             camGo.transform.rotation = Quaternion.identity;
         }

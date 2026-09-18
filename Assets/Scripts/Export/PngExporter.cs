@@ -150,6 +150,11 @@ namespace Whiteboard.Export
             }
         }
 
+        // 表示用クアウド（Boot.CreateLayerQuad）はDefault layer(0)にいる。bakeカメラの
+        // cullingMaskをDefaultにすると表示用クアウドが書き出しPNGに混入しうるため
+        // （PR #6レビューで指摘。LayerCompositorと同じ対応）、未使用のlayer 8を占有する。
+        private const int BakeOnlyLayer = 8;
+
         private void EnsureBakeCamera()
         {
             if (_bakeCamera != null)
@@ -157,7 +162,7 @@ namespace Whiteboard.Export
                 return;
             }
 
-            _bakeMeshGo = new GameObject("WhiteboardExportBakeMesh") { hideFlags = HideFlags.HideAndDontSave };
+            _bakeMeshGo = new GameObject("WhiteboardExportBakeMesh") { hideFlags = HideFlags.HideAndDontSave, layer = BakeOnlyLayer };
             _bakeMeshFilter = _bakeMeshGo.AddComponent<MeshFilter>();
             _bakeMeshRenderer = _bakeMeshGo.AddComponent<MeshRenderer>();
             _bakeMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -170,7 +175,7 @@ namespace Whiteboard.Export
             _bakeCamera.orthographic = true;
             _bakeCamera.nearClipPlane = 0.1f;
             _bakeCamera.farClipPlane = 10f;
-            _bakeCamera.cullingMask = 1;
+            _bakeCamera.cullingMask = 1 << BakeOnlyLayer;
         }
     }
 }
