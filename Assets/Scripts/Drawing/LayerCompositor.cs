@@ -28,6 +28,15 @@ namespace Whiteboard.Drawing
         private int _baseResolution;
         private float _pixelRatio = 1f;
 
+        // メッシュをRenderTextureへ焼き込む手段。GL.PushMatrix+Graphics.DrawMeshNowの
+        // 即時モード呼び出しはWebGL(OpenGLES3)実機で描画されないことを確認したため
+        // （Unity Editor(D3D11)では正しく描画されるがWebGLビルドでは何も表示されない。
+        // 本番相当環境で実機確認済み）、Camera.Render()を使う通常の描画経路へ置き換える。
+        private Camera _bakeCamera;
+        private GameObject _bakeMeshGo;
+        private MeshFilter _bakeMeshFilter;
+        private MeshRenderer _bakeMeshRenderer;
+
         // 他者の進行中ストロークは複数人が同時に描く可能性があるため、
         // strokeId ごとに累積点列を保持し、DropRemoteActive時のみ全体を再描画する。
         private readonly Dictionary<string, RemoteActiveEntry> _remoteActiveStrokes = new Dictionary<string, RemoteActiveEntry>();
@@ -225,6 +234,42 @@ namespace Whiteboard.Drawing
             }
         }
 
+        // 表示用クアウド（Boot.CreateLayerQuad）はDefault layer(0)にいる。bakeカメラの
+        // cullingMaskをDefaultにすると、書き込み先のRenderTextureを貼っている表示用クアウド
+        // 自身がbakeカメラの視野に入り、同一RenderTextureを読みながら書く自己参照が起きる
+        // （PR #6レビューで指摘）。本プロジェクトはカスタムlayerを一切使っていないため、
+        // 未使用のlayer 8をbake専用として占有する。
+        private const int BakeOnlyLayer = 8;
+
+        private void EnsureBakeCamera()
+        {
+            if (_bakeCamera != null)
+            {
+                return;
+            }
+
+            _bakeMeshGo = new GameObject("WhiteboardBakeMesh") { hideFlags = HideFlags.HideAndDontSave, layer = BakeOnlyLayer };
+            _bakeMeshFilter = _bakeMeshGo.AddComponent<MeshFilter>();
+            _bakeMeshRenderer = _bakeMeshGo.AddComponent<MeshRenderer>();
+            _bakeMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _bakeMeshRenderer.receiveShadows = false;
+            _bakeMeshRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+
+            var camGo = new GameObject("WhiteboardBakeCamera") { hideFlags = HideFlags.HideAndDontSave };
+            _bakeCamera = camGo.AddComponent<Camera>();
+            _bakeCamera.enabled = false; // Render()を手動で呼ぶだけで、自動レンダリングループには参加させない。
+            _bakeCamera.orthographic = true;
+            _bakeCamera.orthographicSize = WorldHalfExtent.y;
+            _bakeCamera.nearClipPlane = 0.1f;
+            _bakeCamera.farClipPlane = 10f;
+            // 既存の焼き込み内容を消さずに、このメッシュだけを上乗せする
+            // （元のGL実装もクリアはClearTexture側の責務としていたため、挙動を変えない）。
+            _bakeCamera.clearFlags = CameraClearFlags.Nothing;
+            _bakeCamera.cullingMask = 1 << BakeOnlyLayer;
+            camGo.transform.position = new Vector3(0f, 0f, -1f);
+            camGo.transform.rotation = Quaternion.identity;
+        }
+
         private void DrawMeshInto(RenderTexture rt, Mesh mesh, Color color)
         {
             if (_material == null)
@@ -235,25 +280,21 @@ namespace Whiteboard.Drawing
                     return;
                 }
             }
+            if (mesh == null)
+            {
+                return;
+            }
 
-            var prev = RenderTexture.active;
-            RenderTexture.active = rt;
-            // RenderTexture.active切替時にビューポートを明示しないと、直前にアクティブだった
-            // 描画先（画面解像度等）のビューポートが残ったままになり、RenderTextureの実サイズ
-            // と食い違ってメッシュが正しく描き込まれない（本番相当環境で実際に確認）。
-            GL.Viewport(new Rect(0, 0, rt.width, rt.height));
-
-            GL.PushMatrix();
-            Matrix4x4 proj = Matrix4x4.Ortho(-WorldHalfExtent.x, WorldHalfExtent.x, -WorldHalfExtent.y, WorldHalfExtent.y, -1f, 1f);
-            GL.LoadProjectionMatrix(proj);
-            GL.modelview = Matrix4x4.identity;
+            EnsureBakeCamera();
 
             _material.color = color;
-            _material.SetPass(0);
-            Graphics.DrawMeshNow(mesh, Matrix4x4.identity);
+            _bakeMeshFilter.sharedMesh = mesh;
+            _bakeMeshRenderer.sharedMaterial = _material;
 
-            GL.PopMatrix();
-            RenderTexture.active = prev;
+            var prevTarget = _bakeCamera.targetTexture;
+            _bakeCamera.targetTexture = rt;
+            _bakeCamera.Render();
+            _bakeCamera.targetTexture = prevTarget;
         }
     }
 }

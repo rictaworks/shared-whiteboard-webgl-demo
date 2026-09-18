@@ -18,6 +18,10 @@ namespace Whiteboard.Export
         private const int MaxDimension = 4096;
 
         private Material _material;
+        private Camera _bakeCamera;
+        private GameObject _bakeMeshGo;
+        private MeshFilter _bakeMeshFilter;
+        private MeshRenderer _bakeMeshRenderer;
 
         public byte[] Export(IEnumerable<Stroke> visibleStrokes)
         {
@@ -54,21 +58,27 @@ namespace Whiteboard.Export
 
             var rt = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
             rt.Create();
-            var prevActive = RenderTexture.active;
-            RenderTexture.active = rt;
-            // RenderTexture.active切替時にビューポートを明示しないと、直前にアクティブだった
-            // 描画先のビューポートが残ったままになり、このRenderTextureの実サイズと食い違って
-            // 描き込まれる（LayerCompositor.DrawMeshIntoで確認した同型の不具合。PR #5レビューで指摘）。
-            GL.Viewport(new Rect(0, 0, width, height));
-            GL.Clear(true, true, Color.white);
 
             EnsureMaterial();
+            EnsureBakeCamera();
             if (_material != null)
             {
-                GL.PushMatrix();
-                var proj = Matrix4x4.Ortho(min.x, max.x, min.y, max.y, -1f, 1f);
-                GL.LoadProjectionMatrix(proj);
-                GL.modelview = Matrix4x4.identity;
+                // GL.PushMatrix+Graphics.DrawMeshNowの即時モード描画はWebGL(OpenGLES3)実機では
+                // 描き込まれない（Unity Editor(D3D11)では正しく描画されるがWebGLビルドでは
+                // 何も表示されない。本番相当環境で実機確認済み・LayerCompositor.DrawMeshIntoと
+                // 同型の不具合）。Camera.Render()を使う通常の描画経路に置き換える。
+                var center = (min + max) * 0.5f;
+                _bakeCamera.transform.position = new Vector3(center.x, center.y, -1f);
+                _bakeCamera.orthographicSize = Mathf.Max((max.y - min.y) * 0.5f, 0.01f);
+                _bakeCamera.aspect = (max.x - min.x) / Mathf.Max(max.y - min.y, 0.0001f);
+                _bakeCamera.targetTexture = rt;
+                _bakeCamera.backgroundColor = Color.white;
+
+                // 1回目は白背景でクリアするだけ（メッシュは無しの状態でRenderする）。
+                _bakeCamera.clearFlags = CameraClearFlags.SolidColor;
+                _bakeMeshRenderer.enabled = false;
+                _bakeCamera.Render();
+                _bakeMeshRenderer.enabled = true;
 
                 foreach (var s in strokes)
                 {
@@ -76,13 +86,17 @@ namespace Whiteboard.Export
                     var mesh = RibbonMeshBuilder.Build(s.Points, widthPx);
                     float opacity = MasterData.OpacityFor(s.Tool);
                     _material.color = ColorUtil.HexToColor(s.Color, opacity);
-                    _material.SetPass(0);
-                    Graphics.DrawMeshNow(mesh, Matrix4x4.identity);
+                    _bakeMeshFilter.sharedMesh = mesh;
+                    _bakeMeshRenderer.sharedMaterial = _material;
+                    _bakeCamera.clearFlags = CameraClearFlags.Nothing;
+                    _bakeCamera.Render();
                 }
 
-                GL.PopMatrix();
+                _bakeCamera.targetTexture = null;
             }
 
+            var prevActive = RenderTexture.active;
+            RenderTexture.active = rt;
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
             tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
             tex.Apply();
@@ -134,6 +148,34 @@ namespace Whiteboard.Export
             {
                 _material = new Material(shader);
             }
+        }
+
+        // 表示用クアウド（Boot.CreateLayerQuad）はDefault layer(0)にいる。bakeカメラの
+        // cullingMaskをDefaultにすると表示用クアウドが書き出しPNGに混入しうるため
+        // （PR #6レビューで指摘。LayerCompositorと同じ対応）、未使用のlayer 8を占有する。
+        private const int BakeOnlyLayer = 8;
+
+        private void EnsureBakeCamera()
+        {
+            if (_bakeCamera != null)
+            {
+                return;
+            }
+
+            _bakeMeshGo = new GameObject("WhiteboardExportBakeMesh") { hideFlags = HideFlags.HideAndDontSave, layer = BakeOnlyLayer };
+            _bakeMeshFilter = _bakeMeshGo.AddComponent<MeshFilter>();
+            _bakeMeshRenderer = _bakeMeshGo.AddComponent<MeshRenderer>();
+            _bakeMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _bakeMeshRenderer.receiveShadows = false;
+            _bakeMeshRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+
+            var camGo = new GameObject("WhiteboardExportBakeCamera") { hideFlags = HideFlags.HideAndDontSave };
+            _bakeCamera = camGo.AddComponent<Camera>();
+            _bakeCamera.enabled = false;
+            _bakeCamera.orthographic = true;
+            _bakeCamera.nearClipPlane = 0.1f;
+            _bakeCamera.farClipPlane = 10f;
+            _bakeCamera.cullingMask = 1 << BakeOnlyLayer;
         }
     }
 }
