@@ -48,6 +48,12 @@ namespace Whiteboard.UI
         public List<Button> ColorButtons = new List<Button>();
         public List<Button> ToolButtons = new List<Button>();
         public List<Button> WidthButtons = new List<Button>();
+        // 現在選択中のツール・色・太さを示す状態表示（unity-ugui-runtime-uiスキル
+        // レビュー・Issue #10）。各ボタンと同数・同順のOutlineで、選択中のものだけ
+        // enabled=trueにする。色のみに頼らない区別として枠線の有無を使う。
+        public List<Outline> ToolSelectionOutlines = new List<Outline>();
+        public List<Outline> ColorSelectionOutlines = new List<Outline>();
+        public List<Outline> WidthSelectionOutlines = new List<Outline>();
         public RectTransform CanvasHost; // 描画キャンバス（world quad用カメラのビューポート範囲を示すUIプレースホルダ）
     }
 }
