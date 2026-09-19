@@ -136,7 +136,10 @@ namespace Whiteboard.Boot
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             var scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1280, 800);
+            // BuildScript.ConfigurePlayerSettings()のdefaultScreenWidth/Height（Issue #9で
+            // 1280x800→1280x680へ変更）と一致させる。Unity Playではこの解像度が実質的な
+            // 固定デザイン解像度になるため、基準解像度をずらすとUIの見た目の比率がずれる。
+            scaler.referenceResolution = new Vector2(1280, 680);
             scaler.matchWidthOrHeight = 0.5f;
             canvasGo.AddComponent<GraphicRaycaster>();
             _canvasRoot = canvasGo.GetComponent<RectTransform>();

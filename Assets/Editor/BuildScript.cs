@@ -98,9 +98,17 @@ namespace Whiteboard.EditorTools
             // デモ版は公開スピード優先のため、原因追跡可能な状態を優先しFullWithStacktraceにする。
             PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.FullWithStacktrace;
 
-            // requirements.md 16章：解像度はブラウザウィンドウに追随する（固定解像度は使わない）。
+            // requirements.md 16章：解像度はブラウザウィンドウに追随する（固定解像度は使わない）
+            // 設計だったが、これは自前のindex.html（#unity-canvasをCSSでwidth:100%;height:100%;
+            // にして実現）を経由した場合のみ有効。Unity Playは独自プレイヤーHTMLを使い、
+            // アップロードしたzip内のindex.htmlを読み込まないため、この解像度が実質的に
+            // 本番で使われる唯一の「固定デザイン解像度」になる（Issue #9で判明）。
+            // Unity Play実機のコンテナは実測 約1300×691（アスペクト比 約1.88、環境により変動）
+            // で、従来の1280×800（アスペクト比1.6）とは大きく異なり、Unity Playがこの解像度を
+            // 幅基準でCSSスケールした結果、縦方向がコンテナからはみ出しヘッダー・ツールバーが
+            // 上下端で切れていた。実測アスペクト比に近づけ、はみ出しを抑える。
             PlayerSettings.defaultScreenWidth = 1280;
-            PlayerSettings.defaultScreenHeight = 800;
+            PlayerSettings.defaultScreenHeight = 680;
             PlayerSettings.resizableWindow = true;
 
             PlayerSettings.colorSpace = ColorSpace.Gamma;
