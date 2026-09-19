@@ -54,12 +54,21 @@ namespace Whiteboard.UI
             UiFactory.SetAnchoredBox((RectTransform)createButton.transform, new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(200, 50), new Vector2(-110, 0));
 
             // 一覧（スクロール）
+            // unity-ugui-runtime-uiスキルのレビュー（Issue #10・不変条件5）：ScrollRectは
+            // Viewport（RectMask2Dのみ）→Content（LayoutGroup＋ContentSizeFitter）の3層
+            // 構成で組む。従来はScrollRect本体とRectMask2D・Contentを同一階層にまとめており、
+            // ScrollRect.viewportも未割り当てだった（Unityの暗黙フォールバックに依存）。
             var scrollRoot = UiFactory.CreatePanel("ListScroll", root, UiFactory.PanelColor);
             UiFactory.SetAnchoredBox(scrollRoot, new Vector2(0, 0), new Vector2(1, 1), new Vector2(-40, 0), new Vector2(0, -260));
             var scrollRect = scrollRoot.gameObject.AddComponent<ScrollRect>();
-            var maskGo = scrollRoot.gameObject.AddComponent<RectMask2D>();
 
-            var content = UiFactory.CreateRect("Content", scrollRoot);
+            var viewport = UiFactory.CreateRect("Viewport", scrollRoot);
+            UiFactory.Stretch(viewport);
+            var viewportImage = viewport.gameObject.AddComponent<Image>();
+            viewportImage.color = Color.clear; // マスク描画専用（layout.md「ScrollRectのレイアウト構成」）
+            viewport.gameObject.AddComponent<RectMask2D>();
+
+            var content = UiFactory.CreateRect("Content", viewport);
             content.anchorMin = new Vector2(0, 1);
             content.anchorMax = new Vector2(1, 1);
             content.pivot = new Vector2(0.5f, 1f);
@@ -73,6 +82,7 @@ namespace Whiteboard.UI
             var fitter = content.gameObject.AddComponent<ContentSizeFitter>();
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
+            scrollRect.viewport = viewport;
             scrollRect.content = content;
             scrollRect.horizontal = false;
             scrollRect.vertical = true;
@@ -146,23 +156,28 @@ namespace Whiteboard.UI
             var header = UiFactory.CreatePanel("Header", root, new Color(1f, 1f, 1f, 0.92f));
             UiFactory.SetAnchoredBox(header, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, 56), new Vector2(0, 0));
 
+            // unity-ugui-runtime-uiスキルのレビュー（Issue #10）：タップ領域は参照解像度で
+            // 44px四方以上（不変条件10）。従来は高さ40pxで基準未達だったため44pxへ引き上げる。
+            // ヘッダーは56px・横方向にも十分な余白があるため、高さを増やしてもはみ出さない。
             var backButton = UiFactory.CreateButton("BackButton", header, "← 一覧へ", new Color(0.9f, 0.9f, 0.92f), UiFactory.TextColor, 18);
-            UiFactory.SetAnchoredBox((RectTransform)backButton.transform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(120, 40), new Vector2(70, 0));
+            UiFactory.SetAnchoredBox((RectTransform)backButton.transform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(120, 44), new Vector2(70, 0));
 
             var titleInput = UiFactory.CreateInputField("TitleInput", header, "ボード名");
             UiFactory.SetAnchoredBox((RectTransform)titleInput.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(320, 40), Vector2.zero);
 
             var copyUrlButton = UiFactory.CreateButton("CopyUrlButton", header, "参加URLを複製", new Color(0.9f, 0.9f, 0.92f), UiFactory.TextColor, 16);
-            UiFactory.SetAnchoredBox((RectTransform)copyUrlButton.transform, new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(160, 40), new Vector2(-260, 0));
+            UiFactory.SetAnchoredBox((RectTransform)copyUrlButton.transform, new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(160, 44), new Vector2(-260, 0));
 
             var exportButton = UiFactory.CreateButton("ExportButton", header, "PNGで書き出す", new Color(0.9f, 0.9f, 0.92f), UiFactory.TextColor, 16);
-            UiFactory.SetAnchoredBox((RectTransform)exportButton.transform, new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(150, 40), new Vector2(-90, 0));
+            UiFactory.SetAnchoredBox((RectTransform)exportButton.transform, new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(150, 44), new Vector2(-90, 0));
 
             // ツールバー（下部）
             var toolbar = UiFactory.CreatePanel("Toolbar", root, new Color(1f, 1f, 1f, 0.94f));
             UiFactory.SetAnchoredBox(toolbar, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 84), new Vector2(0, 0));
             var toolbarLayout = toolbar.gameObject.AddComponent<HorizontalLayoutGroup>();
-            toolbarLayout.spacing = 8;
+            // 間隔を8→6へ詰め、後述の色スワッチ拡大分の横幅を確保する（19要素が
+            // 参照解像度幅1280pxに収まる範囲で最大限タップ領域を広げるための調整）。
+            toolbarLayout.spacing = 6;
             toolbarLayout.padding = new RectOffset(12, 12, 10, 10);
             toolbarLayout.childForceExpandHeight = true;
             toolbarLayout.childForceExpandWidth = false;
@@ -186,14 +201,21 @@ namespace Whiteboard.UI
                 var b = UiFactory.CreateButton("Tool_" + label, toolbar, label, new Color(0.93f, 0.93f, 0.95f), UiFactory.TextColor, 16);
                 AddFixedWidth(b.transform, 76);
                 view.ToolButtons.Add(b);
+                view.ToolSelectionOutlines.Add(AddSelectionOutline(b.gameObject));
             }
 
+            // unity-ugui-runtime-uiスキルのレビュー（Issue #10）：色スワッチのタップ領域は
+            // 従来32px幅で基準（44px）未達だった。ツールバー全体の横幅予算（参照解像度1280px）
+            // に収まる範囲で40pxへ拡大する（8色×8px=64px増、間隔を8→6へ詰めた分と合わせて
+            // 収まる）。44pxへの完全な引き上げはツールバーの折り返し・スクロール化を伴う
+            // より大きな改修が必要なため、本改修では見送り所見として報告する。
             foreach (var hex in MasterData.Colors)
             {
                 var swatchRt = UiFactory.CreatePanel("Color_" + hex, toolbar, ColorUtilityParse(hex));
-                AddFixedWidth(swatchRt, 32);
+                AddFixedWidth(swatchRt, 40);
                 var b = swatchRt.gameObject.AddComponent<Button>();
                 view.ColorButtons.Add(b);
+                view.ColorSelectionOutlines.Add(AddSelectionOutline(swatchRt.gameObject));
             }
 
             string[] widthLabels = { "細", "中", "太" };
@@ -202,6 +224,7 @@ namespace Whiteboard.UI
                 var b = UiFactory.CreateButton("Width_" + label, toolbar, label, new Color(0.93f, 0.93f, 0.95f), UiFactory.TextColor, 16);
                 AddFixedWidth(b.transform, 50);
                 view.WidthButtons.Add(b);
+                view.WidthSelectionOutlines.Add(AddSelectionOutline(b.gameObject));
             }
 
             view.UndoButton = UiFactory.CreateButton("UndoButton", toolbar, "Undo", new Color(0.93f, 0.93f, 0.95f), UiFactory.TextColor, 16);
@@ -258,6 +281,23 @@ namespace Whiteboard.UI
             var le = t.gameObject.AddComponent<LayoutElement>();
             le.preferredWidth = width;
             le.minWidth = width;
+        }
+
+        /// <summary>
+        /// unity-ugui-runtime-uiスキルのレビュー（Issue #10）：現在選択中のツール・色・
+        /// 太さを示す状態表示。押下遷移（Buttonの既定のColorTint）とは別に、選択が
+        /// 「続いている」ことを示す持続的な表示が無かったため追加した。色のみに頼らない
+        /// 区別として、選択中は枠線（Outline）を表示する。既定は非表示（enabled=false）で、
+        /// Boot.cs側が現在の選択に応じて1つだけenabled=trueにする。
+        /// </summary>
+        private static Outline AddSelectionOutline(GameObject go)
+        {
+            var outline = go.AddComponent<Outline>();
+            outline.effectColor = UiFactory.AccentColor;
+            outline.effectDistance = new Vector2(3f, -3f);
+            outline.useGraphicAlpha = false;
+            outline.enabled = false;
+            return outline;
         }
 
         private static Color ColorUtilityParse(string hex)

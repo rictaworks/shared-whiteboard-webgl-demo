@@ -140,13 +140,24 @@ namespace Whiteboard.Boot
             // 1280x800→1280x680へ変更）と一致させる。Unity Playではこの解像度が実質的な
             // 固定デザイン解像度になるため、基準解像度をずらすとUIの見た目の比率がずれる。
             scaler.referenceResolution = new Vector2(1280, 680);
-            scaler.matchWidthOrHeight = 0.5f;
+            // unity-ugui-runtime-uiスキルのレビュー（Issue #10）：追従規則は横長0.5・縦長0
+            // （幅基準）とする。本デモはUnity Play実機では常に横長（実測アスペクト比約1.88）
+            // だが、値を画面比率から決めることで将来的な縦長ホスト環境にも対応できるようにする。
+            var isPortrait = Screen.height > Screen.width;
+            scaler.matchWidthOrHeight = isPortrait ? 0f : 0.5f;
             canvasGo.AddComponent<GraphicRaycaster>();
             _canvasRoot = canvasGo.GetComponent<RectTransform>();
 
-            var esGo = new GameObject("EventSystem");
-            esGo.AddComponent<EventSystem>();
-            esGo.AddComponent<StandaloneInputModule>();
+            // unity-ugui-runtime-uiスキルのレビュー（Issue #10・不変条件2）：EventSystemは
+            // シーンに1つだけ存在するよう、生成前に型検索で存在確認する。Bootは現状1回しか
+            // SetupCanvas()を呼ばないため実害は無かったが、テスト実行等でシーンが再利用される
+            // 場合に備えた防御的な変更。
+            if (UnityEngine.Object.FindFirstObjectByType<EventSystem>() == null)
+            {
+                var esGo = new GameObject("EventSystem");
+                esGo.AddComponent<EventSystem>();
+                esGo.AddComponent<StandaloneInputModule>();
+            }
         }
 
         private void SetupWorldRendering()
@@ -467,6 +478,7 @@ namespace Whiteboard.Boot
             _currentTool = tool;
             _currentColor = toolColor;
             _currentWidth = width;
+            RefreshToolSelectionUi();
 
             var (panX, panY, zoom) = _prefs.GetViewport(boardId);
             _cameraController.Center = new Vector2(panX, panY);
@@ -591,18 +603,42 @@ namespace Whiteboard.Boot
                 _currentWidth = MasterData.DefaultWidthFor(tool);
             }
             _prefs.SetToolSettings(_currentTool, _currentColor, _currentWidth);
+            RefreshToolSelectionUi();
         }
 
         private void SelectColor(string color)
         {
             _currentColor = color;
             _prefs.SetToolSettings(_currentTool, _currentColor, _currentWidth);
+            RefreshToolSelectionUi();
         }
 
         private void SelectWidth(StrokeWidth width)
         {
             _currentWidth = width;
             _prefs.SetToolSettings(_currentTool, _currentColor, _currentWidth);
+            RefreshToolSelectionUi();
+        }
+
+        /// <summary>
+        /// unity-ugui-runtime-uiスキルのレビュー（Issue #10）：現在選択中のツール・色・
+        /// 太さを枠線表示に反映する。ボード画面に入るたび（保存済み設定の復元時）と、
+        /// ツールバーでの選択変更のたびに呼ぶ。
+        /// </summary>
+        private void RefreshToolSelectionUi()
+        {
+            for (int i = 0; i < _boardView.ToolSelectionOutlines.Count; i++)
+            {
+                _boardView.ToolSelectionOutlines[i].enabled = (int)_currentTool == i;
+            }
+            for (int i = 0; i < _boardView.ColorSelectionOutlines.Count && i < MasterData.Colors.Length; i++)
+            {
+                _boardView.ColorSelectionOutlines[i].enabled = MasterData.Colors[i] == _currentColor;
+            }
+            for (int i = 0; i < _boardView.WidthSelectionOutlines.Count; i++)
+            {
+                _boardView.WidthSelectionOutlines[i].enabled = (int)_currentWidth == i;
+            }
         }
 
         private void OnUndoClicked()
