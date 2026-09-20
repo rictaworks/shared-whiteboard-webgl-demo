@@ -74,6 +74,20 @@ RSpec.describe "Api::V1::Boards", type: :request do
       expect(boards.map { |b| b["title"] }).to eq(["Aのボード"])
       expect(boards.first["participant_count"]).to eq(1)
     end
+
+    # Issue #30：一覧から入ったボードでも中継サーバーへ join できるようにするため、
+    # board_token を返す必要がある。返していなかったため本番で join が成立せず、
+    # 描画opが全て捨てられUndo/Redoも永久に無反応になっていた。
+    it "board_tokenを含める（中継サーバーへのjoinに必須）" do
+      key = issue_session_key
+      post "/api/v1/boards", params: { title: "トークン確認" }, headers: auth_headers(key), as: :json
+      created_token = JSON.parse(response.body)["board_token"]
+
+      get "/api/v1/boards", headers: auth_headers(key)
+
+      boards = JSON.parse(response.body)["boards"]
+      expect(boards.first["board_token"]).to eq(created_token)
+    end
   end
 
   describe "PATCH /api/v1/boards/:board_id" do

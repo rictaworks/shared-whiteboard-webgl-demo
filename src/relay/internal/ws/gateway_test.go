@@ -435,6 +435,40 @@ func TestWS_InvalidMessages_DiscardedConnectionStaysAlive(t *testing.T) {
 	}
 }
 
+// TestWS_JoinWithEmptyBoardToken_NothingIsPersisted reproduces Issue #30: a
+// join whose board_token is empty fails validation, so the connection never
+// becomes joined and every later message is discarded. The client sees no
+// join_accepted and no op_confirmed, which in production looked like "drawing
+// works but nothing is saved and Undo does nothing" - the relay's only job
+// here is to not pretend the session is healthy.
+func TestWS_JoinWithEmptyBoardToken_NothingIsPersisted(t *testing.T) {
+	relay := newTestRelay(t)
+	client := dial(t, relay)
+
+	client.send(message.ClientMessage{Type: "join", SessionKey: "session-no-token", BoardToken: "", LastSeq: 0})
+	if typ, _, ok := client.tryReadTyped(500 * time.Millisecond); ok {
+		t.Fatalf("expected no reply to an invalid join, got %q", typ)
+	}
+
+	// An op sent on the un-joined connection must not be confirmed.
+	client.send(message.ClientMessage{
+		Type:   "op",
+		OpID:   "op-after-invalid-join",
+		Kind:   "stroke_add",
+		Stroke: &message.Stroke{ID: "s1", Tool: "pen", Color: "#1A1A1A", Width: "medium", Points: []message.Point{{0, 0}, {1, 1}}},
+	})
+	if typ, _, ok := client.tryReadTyped(500 * time.Millisecond); ok {
+		t.Fatalf("expected no reply for an op before joining, got %q", typ)
+	}
+
+	// A join carrying the token does succeed on the same connection, which is
+	// what the client-side fix restores.
+	accepted := joinAndAccept(t, client, "session-no-token", "board-issue-30", 0)
+	if accepted.Label == "" {
+		t.Fatalf("join_accepted carried no label: %+v", accepted)
+	}
+}
+
 // ---- Required scenario 6: disconnect drops the active stroke ---------------
 
 func TestWS_Disconnect_DropsActiveStrokeAndBroadcastsPresence(t *testing.T) {
