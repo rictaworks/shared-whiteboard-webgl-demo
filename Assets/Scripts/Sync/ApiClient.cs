@@ -67,7 +67,7 @@ namespace Whiteboard.Sync
             Request("GET", path, null, callback);
         }
 
-        private void Request(string method, string path, Dictionary<string, object> body, Action<int, Dictionary<string, object>> callback)
+        private void Request(string method, string path, Dictionary<string, object> body, Action<int, Dictionary<string, object>> callback, bool allowSessionRetry = true)
         {
             var headers = new Dictionary<string, object>();
             var sessionKey = _prefs?.GetSessionKey();
@@ -77,10 +77,31 @@ namespace Whiteboard.Sync
             }
 
             int id = _nextRequestId++;
-            if (callback != null)
+            // 日次リセット（DailyResetJob#purge_all）はSession.delete_allで全セッションを
+            // 削除する（Issue #11）。日次リセットより前にこのデモを訪れたブラウザは、
+            // 削除済みのsession_keyを保持し続け、以後の全リクエストがOwnedByParticipationの
+            // require_session_keyで401を返し続ける（Issue #16・2026-09-20実機確認）。
+            // session_key付きのリクエストが401を受けたら、キーを破棄して新規セッションを
+            // 発行し、元のリクエストを1回だけ再試行する（無限リトライを避けるため
+            // allowSessionRetry=falseで再試行する）。
+            Action<int, Dictionary<string, object>> handler = (status, responseBody) =>
             {
-                _callbacks[id] = callback;
-            }
+                if (status == 401 && allowSessionRetry && !string.IsNullOrEmpty(sessionKey))
+                {
+                    _prefs?.SetSessionKey("");
+                    Request("POST", "/api/v1/sessions", null, (issueStatus, issueBody) =>
+                    {
+                        if (issueStatus == 201 && issueBody != null && issueBody.TryGetValue("session_key", out var newKey))
+                        {
+                            _prefs?.SetSessionKey(newKey.ToString());
+                        }
+                        Request(method, path, body, callback, allowSessionRetry: false);
+                    }, allowSessionRetry: false);
+                    return;
+                }
+                callback?.Invoke(status, responseBody);
+            };
+            _callbacks[id] = handler;
 
             string headersJson = MiniJson.Serialize(headers);
             string bodyJson = body != null ? MiniJson.Serialize(body) : "";
