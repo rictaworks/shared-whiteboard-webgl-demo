@@ -150,6 +150,11 @@ namespace Whiteboard.UI
         {
             var root = UiFactory.CreatePanel("BoardScreen", _root, Color.clear);
             UiFactory.Stretch(root);
+            // 実機バグ修正（2026-09-21・Issue #34）：透明なImageでも raycastTarget は
+            // 既定で有効なため、この全画面パネルがキャンバス全域のレイキャストを拾う。
+            // 「押下がUI上か」の判定を入れる前提として、描画面を覆うだけの装飾パネルは
+            // レイキャスト対象から外す（外さないと全面がUI扱いになり描画できなくなる）。
+            root.GetComponent<Image>().raycastTarget = false;
             root.gameObject.SetActive(false);
 
             // キャンバス表示領域（実際の描画はワールド空間クアッド。このRectは範囲の目安として空ける）
@@ -253,12 +258,19 @@ namespace Whiteboard.UI
             AddFixedWidth(view.FitAllButton.transform, 80);
 
             // 状態表示（右上）
+            // 実機バグ修正（2026-09-21・Issue #35）：右上の「点」アンカーに既定pivot
+            // (0.5, 0.5) のまま置いていたため、矩形の中心が右端から16pxの位置に来て、
+            // 幅の半分が画面外へはみ出していた（「URLをコピーしました」が「URLを」で
+            // 切れる・ズーム率が欠ける）。Issue #18 と同じ原因だが、SetAnchoredBox
+            // 経由のこの2つが取り残されていた。pivot を右上に合わせ右端基準で配置する。
             var statusText = UiFactory.CreateText("StatusText", root, "同期中", 16, UiFactory.MutedColor, TextAnchor.MiddleRight);
             UiFactory.SetAnchoredBox((RectTransform)statusText.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(240, 24), new Vector2(-16, -66));
+            ((RectTransform)statusText.transform).pivot = new Vector2(1, 1);
             view.StatusText = statusText;
 
             var zoomText = UiFactory.CreateText("ZoomText", root, "100%", 14, UiFactory.MutedColor, TextAnchor.MiddleRight);
             UiFactory.SetAnchoredBox((RectTransform)zoomText.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(120, 20), new Vector2(-16, -90));
+            ((RectTransform)zoomText.transform).pivot = new Vector2(1, 1);
             view.ZoomText = zoomText;
 
             // 参加者一覧（左上）

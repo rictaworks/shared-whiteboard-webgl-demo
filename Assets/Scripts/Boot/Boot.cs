@@ -79,6 +79,15 @@ namespace Whiteboard.Boot
         private string _currentColor = MasterData.DefaultColor;
         private StrokeWidth _currentWidth = StrokeWidth.Medium;
 
+        // Issue #34：押下がuGUIの上で始まったジェスチャは、その後のmove/upもまとめて無視する。
+        private bool _pointerStartedOverUi;
+        private readonly List<RaycastResult> _uiRaycastResults = new List<RaycastResult>();
+
+        // Issue #33：ボード名の現在値と、画面遷移に伴う onEndEdit を無視するための印。
+        private string _boardTitle = "";
+        private string _boardTitleOnEnter = "";
+        private bool _suppressTitleEdit;
+
         private float _activeDeltaTimer;
         private float _cursorTimer;
         private float _viewportPersistTimer;
@@ -306,7 +315,11 @@ namespace Whiteboard.Boot
                         var button = row.GetComponent<Button>();
                         string capturedId = boardId;
                         string capturedToken = boardToken;
-                        button.onClick.AddListener(() => EnterExistingBoard(capturedId, capturedToken));
+                        // Issue #33：ボード画面に現在の名前を表示するため、一覧の値を引き継ぐ。
+                        // 一覧は名前が無いとき "無題のボード" を表示用に補っているので、
+                        // 入力欄へはそれを入れずに空（プレースホルダ表示）のままにする。
+                        string capturedTitle = d.TryGetValue("title", out var rawTitle) && rawTitle != null ? rawTitle.ToString() : "";
+                        button.onClick.AddListener(() => EnterExistingBoard(capturedId, capturedToken, capturedTitle));
                     }
                 }
             });
@@ -322,7 +335,8 @@ namespace Whiteboard.Boot
                 {
                     string boardId = body.TryGetValue("board_id", out var bid) ? bid.ToString() : null;
                     string boardToken = body.TryGetValue("board_token", out var bt) && bt != null ? bt.ToString() : "";
-                    EnterExistingBoard(boardId, boardToken);
+                    string createdTitle = body.TryGetValue("title", out var ct) && ct != null ? ct.ToString() : "";
+                    EnterExistingBoard(boardId, boardToken, createdTitle);
                 }
                 else
                 {
@@ -331,12 +345,13 @@ namespace Whiteboard.Boot
             });
         }
 
-        private void EnterExistingBoard(string boardId, string boardToken)
+        private void EnterExistingBoard(string boardId, string boardToken, string boardTitle)
         {
             if (string.IsNullOrEmpty(boardId))
             {
                 return;
             }
+            _boardTitleOnEnter = boardTitle ?? "";
             // 参加URLの構成要素はボードトークンだが、一覧からの遷移では既に参加済みのため
             // by_token/join を経由せず、直接 ops を取得してボード画面へ入る。
             //
@@ -406,6 +421,8 @@ namespace Whiteboard.Boot
                     var opsObj = body.TryGetValue("ops", out var o) ? o as List<object> : null;
                     string label = body.TryGetValue("label", out var l) ? l.ToString() : null;
                     string color = body.TryGetValue("color", out var col) ? col.ToString() : null;
+                    // Issue #33：参加URL経由でもボード画面に現在の名前を表示する。
+                    _boardTitleOnEnter = body.TryGetValue("title", out var jt) && jt != null ? jt.ToString() : "";
                     EnterBoard(boardId, opsObj, label, color);
                 }
                 else if (status == 409)
@@ -504,7 +521,13 @@ namespace Whiteboard.Boot
 
             _phase = Phase.InBoard;
             ShowOnly(_boardView.Root);
-            _boardView.BoardTitleInput.text = "";
+            // 実機バグ修正（2026-09-21・Issue #33）：従来はここで常に空にしていたため、
+            // 作成時に付けた名前がボード画面に出ず、一覧へ戻る際の onEndEdit で
+            // その空文字が改名として送られてボード名が消えていた。現在の名前を表示する。
+            _suppressTitleEdit = true;
+            _boardTitle = _boardTitleOnEnter ?? "";
+            _boardView.BoardTitleInput.text = _boardTitle;
+            _suppressTitleEdit = false;
 
             RefreshParticipantList();
         }
@@ -699,6 +722,17 @@ namespace Whiteboard.Boot
             {
                 return;
             }
+            // 実機バグ修正（2026-09-21・Issue #33）：uGUI の InputField は GameObject が
+            // 無効化されるときにも onEndEdit を発火する。一覧へ戻ると ShowOnly が
+            // ボード画面を SetActive(false) にするため、毎回ここが呼ばれていた。
+            // 加えて EnterBoard がタイトル欄を常に空にしていたので、空文字での改名が
+            // 送られ、作成時に付けた名前が「無題のボード」へ戻されていた。
+            // 画面遷移中は抑止し、値が変わっていなければ送らない。
+            if (_suppressTitleEdit || newTitle == _boardTitle)
+            {
+                return;
+            }
+            _boardTitle = newTitle;
             _api.RenameBoard(_boardId, newTitle, null);
         }
 
@@ -795,8 +829,27 @@ namespace Whiteboard.Boot
                     continue;
                 }
 
-                var mode = _gestureRouter.Route(ev);
                 Vector2 screen = new Vector2(ev.X, ev.Y);
+
+                // 実機バグ修正（2026-09-21・Issue #34）：InputBridgeはキャンバスの
+                // Pointerイベントを直接読むため、uGUIのボタンの上で押しても同じ座標が
+                // ここへ届く。UI上かを判定していなかったので、ツールバーのボタンを
+                // 押すたびにその位置へ点が1つ描かれていた（色ボタンを押せばその色の点）。
+                // 押下がUI上なら、そのジェスチャは最後まで（move/up）無視する。
+                if (ev.Type == "down")
+                {
+                    _pointerStartedOverUi = IsOverUi(screen);
+                }
+                if (_pointerStartedOverUi)
+                {
+                    if (ev.Type == "up" || ev.Type == "cancel")
+                    {
+                        _pointerStartedOverUi = false;
+                    }
+                    continue;
+                }
+
+                var mode = _gestureRouter.Route(ev);
                 Vector2 world = _cameraController.ToWorld(screen);
 
                 switch (ev.Type)
@@ -813,6 +866,34 @@ namespace Whiteboard.Boot
                         break;
                 }
             }
+        }
+
+        /// <summary>
+        /// InputBridge から届いた座標が uGUI の要素の上かを判定する（Issue #34）。
+        ///
+        /// EventSystem.IsPointerOverGameObject() は Unity 標準入力の Input.mousePosition を
+        /// 見るが、本アプリはブラウザの Pointer イベントを InputBridge 経由で直接読んでおり
+        /// 両者は一致しない（Unity WebGL の Input.mousePosition はマウス移動イベントでしか
+        /// 更新されない）。そのため受け取った座標を自分でレイキャストする。
+        ///
+        /// InputBridge の Y は下方向が正（ブラウザ基準）、Unity のスクリーン座標は上方向が
+        /// 正なので、渡す前に反転する。
+        /// </summary>
+        private bool IsOverUi(Vector2 bridgeScreen)
+        {
+            var eventSystem = EventSystem.current;
+            if (eventSystem == null)
+            {
+                return false;
+            }
+
+            var data = new PointerEventData(eventSystem)
+            {
+                position = new Vector2(bridgeScreen.x, Screen.height - bridgeScreen.y),
+            };
+            _uiRaycastResults.Clear();
+            eventSystem.RaycastAll(data, _uiRaycastResults);
+            return _uiRaycastResults.Count > 0;
         }
 
         private void HandleDown(GestureMode mode, Vector2 screen, Vector2 world)
@@ -961,10 +1042,15 @@ namespace Whiteboard.Boot
 
         private void ShowOnly(RectTransform target)
         {
+            // 実機バグ修正（2026-09-21・Issue #33）：InputField は無効化されるときにも
+            // onEndEdit を発火するため、ここでボード画面を閉じると「空文字で改名」が
+            // 送られてボード名が消えていた。画面の切り替えの間だけ改名を抑止する。
+            _suppressTitleEdit = true;
             _loadingView.Root.gameObject.SetActive(target == _loadingView.Root);
             _listView.Root.gameObject.SetActive(target == _listView.Root);
             _joinView.Root.gameObject.SetActive(target == _joinView.Root);
             _boardView.Root.gameObject.SetActive(target == _boardView.Root);
+            _suppressTitleEdit = false;
             // 実機バグ修正（2026-09-20）：画面遷移直後はキャンバスにDOMフォーカスが
             // 無いままのことがあり、クリックするまで再描画・リサイズが反映されず
             // 見切れて見える現象があったため、遷移のたびに明示的にフォーカスを移す。

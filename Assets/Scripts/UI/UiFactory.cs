@@ -61,6 +61,11 @@ namespace Whiteboard.UI
             // <size=...>やタグの繰り込みによる表示崩し・描画負荷DoS（Unity版のリッチテキスト
             // インジェクション）を許してしまう。常にプレーンテキストとして描画する。
             text.supportRichText = false;
+            // 実機バグ修正（2026-09-21・Issue #34）：Text も Graphic なので raycastTarget が
+            // 既定で有効。ラベルは入力を受け取る必要がなく、右上の状態表示のように描画面へ
+            // 重なるものがあると、そこだけ描けない領域になってしまう。押下を拾うのは
+            // ボタン自身の Image に任せ、ラベルはレイキャスト対象から外す。
+            text.raycastTarget = false;
             return text;
         }
 
@@ -146,6 +151,15 @@ namespace Whiteboard.UI
             rt.offsetMax = new Vector2(-right, -top);
         }
 
+        /// <summary>
+        /// アンカー・大きさ・位置をまとめて設定する。
+        ///
+        /// pivot は変更しない（既定の (0.5, 0.5) のまま）。呼び出し側の
+        /// anchoredPosition は中心基準で調整されているため、ここで一律に
+        /// pivot をアンカーへ合わせると全画面のレイアウトがずれる。
+        /// キャンバス端へ寄せる要素は、呼び出し側で pivot を明示すること
+        /// （Issue #18・#35。既定 pivot のままだと大きさの半分が画面外へ出る）。
+        /// </summary>
         public static void SetAnchoredBox(RectTransform rt, Vector2 anchorMin, Vector2 anchorMax, Vector2 sizeDelta, Vector2 anchoredPosition)
         {
             rt.anchorMin = anchorMin;
