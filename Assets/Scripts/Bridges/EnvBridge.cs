@@ -26,11 +26,15 @@ namespace Whiteboard.Bridges
         [DllImport("__Internal")]
         private static extern string WB_Env_RelayWsUrl();
 
+        [DllImport("__Internal")]
+        private static extern void WB_Env_FocusCanvas();
+
         public static string BoardToken() => WB_Env_BoardToken();
         public static void Init() => WB_Env_Init();
         public static string Drain() => WB_Env_Drain();
         public static void Download(byte[] bytes, string filename) => WB_Env_Download(bytes, bytes?.Length ?? 0, filename);
         public static string RelayWsUrl() => WB_Env_RelayWsUrl();
+        public static void FocusCanvas() => WB_Env_FocusCanvas();
 #else
         public static string BoardToken()
         {
@@ -57,6 +61,11 @@ namespace Whiteboard.Bridges
         {
             // Editorモック：開発用ローカル中継サーバーを既定値とする。
             return "ws://localhost:8080/ws";
+        }
+
+        public static void FocusCanvas()
+        {
+            // Editorモック：no-op。
         }
 #endif
     }

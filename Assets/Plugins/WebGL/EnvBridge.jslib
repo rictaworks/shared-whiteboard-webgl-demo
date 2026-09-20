@@ -74,6 +74,19 @@ mergeInto(LibraryManager.library, {
     return buffer;
   },
 
+  // 実機バグ修正（2026-09-20）：Unity Playの独自プレイヤーは、ページ読み込み直後だけでなく
+  // 一覧→ボード等の画面遷移（EnterBoard）の直後もキャンバスへ自動でフォーカスを移さない
+  // （既知のissue #20と同系統）。runInBackground=trueでメインループの完全停止は防げたが、
+  // 遷移直後にフォーカスが無いままだとキャンバスの再描画・リサイズ反映が遅れ、本人の実機で
+  // ボード画面のヘッダー・ツールバーが一時的に上下端で見切れて表示される現象が確認された。
+  // 画面遷移の直後に明示的にキャンバスへフォーカスを移し、クリックを待たず再描画させる。
+  WB_Env_FocusCanvas: function () {
+    var canvas = document.querySelector('canvas');
+    if (canvas && typeof canvas.focus === 'function') {
+      canvas.focus();
+    }
+  },
+
   WB_Env_Download: function (bytesPtr, length, filenamePtr) {
     var filename = UTF8ToString(filenamePtr);
     var buffer = new Uint8Array(length);

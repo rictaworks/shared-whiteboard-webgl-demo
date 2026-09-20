@@ -948,6 +948,10 @@ namespace Whiteboard.Boot
             _listView.Root.gameObject.SetActive(target == _listView.Root);
             _joinView.Root.gameObject.SetActive(target == _joinView.Root);
             _boardView.Root.gameObject.SetActive(target == _boardView.Root);
+            // 実機バグ修正（2026-09-20）：画面遷移直後はキャンバスにDOMフォーカスが
+            // 無いままのことがあり、クリックするまで再描画・リサイズが反映されず
+            // 見切れて見える現象があったため、遷移のたびに明示的にフォーカスを移す。
+            EnvBridge.FocusCanvas();
         }
     }
 }
