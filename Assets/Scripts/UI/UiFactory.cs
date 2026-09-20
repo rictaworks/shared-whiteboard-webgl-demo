@@ -77,6 +77,14 @@ namespace Whiteboard.UI
             text.color = textColor;
             text.alignment = TextAnchor.MiddleCenter;
             text.supportRichText = false; // 同上（ボタンラベルは静的文言のみだが防御的に統一する）。
+            // 実機バグ修正（2026-09-20）：NotoSansJP-VF（可変フォント）はuGUIの旧Text
+            // コンポーネント（TextMeshProではない）では既定のウェイト軸で描画され、
+            // Regular相当の細い字形になる。白文字を青系のアクセントカラー背景に載せる
+            // 「ボードを作成する」ボタン等で、アンチエイリアシングの縁が背景色に溶け込み、
+            // 本人の実機で「グレーアウトして押せなさそうに見える」と指摘された
+            // （色の値自体はColor.whiteで正しいが、視覚的な太さ・コントラストが不足していた）。
+            // FontStyle.Boldへ変更し、字形を太くして視認性を上げる。
+            text.fontStyle = FontStyle.Bold;
             return button;
         }
 
