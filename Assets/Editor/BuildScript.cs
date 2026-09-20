@@ -111,6 +111,16 @@ namespace Whiteboard.EditorTools
             PlayerSettings.defaultScreenHeight = 680;
             PlayerSettings.resizableWindow = true;
 
+            // 実機バグ修正（2026-09-20・Issue #20）：既定値のfalseのままだと、Unity WebGL
+            // ビルドはブラウザウィンドウ（実質的にはキャンバスのフォーカス）を失っている間、
+            // メインループ（描画・Update）を完全に停止する。Unity Playの独自プレイヤーは
+            // ページ読み込み直後にiframe内のキャンバスへ自動でフォーカスを移さないため、
+            // 最初のクリックがフォーカス獲得だけに消費されて反応せず、2回目でようやく
+            // 反映される現象（本セッションの実機検証で複数回確認・tourist-flow-balancer-demo
+            // でも既知の未修正課題として同種の記載あり）や、全画面表示への切り替え時に
+            // フォーカスが一瞬外れて黒画面のまま止まる現象の原因になっていた。
+            PlayerSettings.runInBackground = true;
+
             PlayerSettings.colorSpace = ColorSpace.Gamma;
         }
     }
