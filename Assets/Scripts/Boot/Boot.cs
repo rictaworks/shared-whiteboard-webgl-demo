@@ -875,6 +875,11 @@ namespace Whiteboard.Boot
                 return;
             }
             var op = Op.NewStrokeErase(Guid.NewGuid().ToString("N"), hitIds, _sync.MyLabel);
+            // 実機バグ修正（2026-09-21・Issue #28）：描画（FinishLocalStroke）・全消去
+            // （OnClearClicked）は履歴へ記録しているのに、消去だけ記録が漏れていた。
+            // その結果、消しゴムの直後にUndoを押すと消去ではなく「1つ前に描いた線」が
+            // 取り消されていた（requirements.md 12章：自分の操作は取り消せること）。
+            _history.Record(op);
             _boardState.ApplyOp(op, _boardState.LastSeq);
             _compositor.Rebuild(_boardState.VisibleStrokes());
             _sync.SendOp(op);
