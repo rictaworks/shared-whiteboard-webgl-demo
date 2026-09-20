@@ -88,7 +88,11 @@ namespace Whiteboard.UI
             scrollRect.vertical = true;
 
             var info = UiFactory.CreateText("Info", root, "", 18, UiFactory.MutedColor, TextAnchor.MiddleCenter);
-            UiFactory.SetAnchoredBox((RectTransform)info.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 30), new Vector2(0, 10));
+            // 実機バグ修正（2026-09-20）：下端の点アンカーと既定pivot=0.5の不整合で、
+            // 従来のanchoredPosition.y=10だと下端5pxがキャンバス外にはみ出していた
+            // （軽微）。15へ変更し、矩形の下端がちょうどキャンバス下端に接するようにする
+            // （見た目の位置はほぼ変えず、はみ出しだけを無くす）。
+            UiFactory.SetAnchoredBox((RectTransform)info.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 30), new Vector2(0, 15));
 
             return new BoardListView
             {
@@ -155,6 +159,13 @@ namespace Whiteboard.UI
             // ヘッダー
             var header = UiFactory.CreatePanel("Header", root, new Color(1f, 1f, 1f, 0.92f));
             UiFactory.SetAnchoredBox(header, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, 56), new Vector2(0, 0));
+            // 実機バグ修正（2026-09-20・Issue #9の本当の原因）：RectTransformの既定pivotは
+            // (0.5, 0.5)。anchorMin/anchorMaxのY軸を(1, 1)（キャンバス上端の「点」アンカー）
+            // にしたままpivot.yが0.5だと、矩形の中心が上端に来てしまい、高さの半分（28px）が
+            // キャンバス外（上）にはみ出して描画されない。Issue #9では解像度のアスペクト比の
+            // 乖離を原因と誤って特定し修正したが、上下端で切れる本当の原因はこれだった。
+            // pivot.yをアンカー辺（上端なので1）に合わせ、矩形を辺に密着させてはみ出しを無くす。
+            header.pivot = new Vector2(header.pivot.x, 1f);
 
             // unity-ugui-runtime-uiスキルのレビュー（Issue #10）：タップ領域は参照解像度で
             // 44px四方以上（不変条件10）。従来は高さ40pxで基準未達だったため44pxへ引き上げる。
@@ -174,6 +185,9 @@ namespace Whiteboard.UI
             // ツールバー（下部）
             var toolbar = UiFactory.CreatePanel("Toolbar", root, new Color(1f, 1f, 1f, 0.94f));
             UiFactory.SetAnchoredBox(toolbar, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 84), new Vector2(0, 0));
+            // 実機バグ修正（2026-09-20）：ヘッダーと同じ理由（既定pivot=0.5とキャンバス下端の
+            // 点アンカーの不整合）で、高さの半分（42px）がキャンバス外（下）にはみ出していた。
+            toolbar.pivot = new Vector2(toolbar.pivot.x, 0f);
             var toolbarLayout = toolbar.gameObject.AddComponent<HorizontalLayoutGroup>();
             // 間隔を8→6へ詰め、後述の色スワッチ拡大分の横幅を確保する（19要素が
             // 参照解像度幅1280pxに収まる範囲で最大限タップ領域を広げるための調整）。
@@ -250,6 +264,9 @@ namespace Whiteboard.UI
             // 参加者一覧（左上）
             var participantPanel = UiFactory.CreatePanel("ParticipantPanel", root, new Color(1f, 1f, 1f, 0.9f));
             UiFactory.SetAnchoredBox(participantPanel, new Vector2(0, 1), new Vector2(0, 1), new Vector2(180, 160), new Vector2(106, -66));
+            // 実機バグ修正（2026-09-20）：ヘッダー・ツールバーと同じ理由で、上端が14pxだけ
+            // キャンバス外にはみ出していた（左上の「3つの黒い点と白い四角」の白い四角）。
+            participantPanel.pivot = new Vector2(participantPanel.pivot.x, 1f);
             var participantContent = UiFactory.CreateRect("Content", participantPanel);
             UiFactory.Stretch(participantContent, 8, 8, 8, 8);
             var pLayout = participantContent.gameObject.AddComponent<VerticalLayoutGroup>();
