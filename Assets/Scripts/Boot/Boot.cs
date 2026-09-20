@@ -297,6 +297,7 @@ namespace Whiteboard.Boot
                     if (item is Dictionary<string, object> d)
                     {
                         string boardId = d.TryGetValue("board_id", out var bid) ? bid.ToString() : "";
+                        string boardToken = d.TryGetValue("board_token", out var bt) && bt != null ? bt.ToString() : "";
                         string title = d.TryGetValue("title", out var ti) && ti != null ? ti.ToString() : "無題のボード";
                         string updatedAt = d.TryGetValue("updated_at", out var ua) ? ua.ToString() : "";
                         int participants = d.TryGetValue("participant_count", out var pc) ? (int)Convert.ToDouble(pc) : 0;
@@ -304,7 +305,8 @@ namespace Whiteboard.Boot
                         var row = _uiBuilder.CreateBoardListRow(_listView.ListContent, title, updatedAt, participants);
                         var button = row.GetComponent<Button>();
                         string capturedId = boardId;
-                        button.onClick.AddListener(() => EnterExistingBoard(capturedId));
+                        string capturedToken = boardToken;
+                        button.onClick.AddListener(() => EnterExistingBoard(capturedId, capturedToken));
                     }
                 }
             });
@@ -319,7 +321,8 @@ namespace Whiteboard.Boot
                 if (status == 201 && body != null)
                 {
                     string boardId = body.TryGetValue("board_id", out var bid) ? bid.ToString() : null;
-                    EnterExistingBoard(boardId);
+                    string boardToken = body.TryGetValue("board_token", out var bt) && bt != null ? bt.ToString() : "";
+                    EnterExistingBoard(boardId, boardToken);
                 }
                 else
                 {
@@ -328,7 +331,7 @@ namespace Whiteboard.Boot
             });
         }
 
-        private void EnterExistingBoard(string boardId)
+        private void EnterExistingBoard(string boardId, string boardToken)
         {
             if (string.IsNullOrEmpty(boardId))
             {
@@ -336,6 +339,15 @@ namespace Whiteboard.Boot
             }
             // 参加URLの構成要素はボードトークンだが、一覧からの遷移では既に参加済みのため
             // by_token/join を経由せず、直接 ops を取得してボード画面へ入る。
+            //
+            // 実機バグ修正（2026-09-21・Issue #30）：ただしボードトークンは中継サーバーへの
+            // join に必須で、relay 側は空トークンの join を無言で読み捨てる。従来は
+            // EnvBridge.BoardToken()（ページURLの ?b=）からしか設定しておらず、Unity Play では
+            // ゲームが struckd のURLのiframeで動くため ?b= が存在し得ず、一覧から入った場合は
+            // 常に空だった。その結果 join が成立せず、描画opが全て捨てられ（リロードで線が消える）、
+            // Undo/Redo も undo_flag_confirmed が返らず永久に無反応になっていた。
+            // 一覧・新規作成のレスポンスに含まれるトークンをここで引き継ぐ。
+            _boardToken = boardToken;
             _boardId = boardId;
             _api.FetchOps(boardId, 0, null, (status, body) =>
             {

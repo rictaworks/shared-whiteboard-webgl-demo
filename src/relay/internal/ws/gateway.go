@@ -163,6 +163,12 @@ func (g *Gateway) serve(conn *Connection) {
 				continue
 			}
 			if err := message.Validate(&msg); err != nil {
+				// An invalid join leaves the connection alive but permanently
+				// unusable: every later message is discarded because joined is
+				// still false. Swallowing this silently hid a total sync
+				// outage in production for days (Issue #30), so log it. The
+				// error text carries no secrets - only which field was missing.
+				log.Printf("ws: rejected join: %v", err)
 				continue
 			}
 			h, ok := g.handleJoin(conn, &msg)

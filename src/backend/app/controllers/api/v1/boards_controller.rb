@@ -35,6 +35,10 @@ module Api
           board = participation.board
           {
             board_id: board.id,
+            # board_token は中継サーバーへの join に必須（Issue #30）。返すのは
+            # 自分が参加者であるボードだけなので、参加URLで既に渡しているものと
+            # 同じ値を本人に返すことになり、新たな権限の露出は無い。
+            board_token: board.board_token,
             title: board.title,
             updated_at: board.updated_at.iso8601,
             participant_count: Participation.where(board_id: board.id).count
