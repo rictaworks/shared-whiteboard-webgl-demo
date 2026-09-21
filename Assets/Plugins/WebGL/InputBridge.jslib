@@ -140,4 +140,20 @@ mergeInto(LibraryManager.library, {
       // no-op
     }
   },
+
+  // 実機バグ修正（2026-09-21・Issue #37）：このブリッジはキャンバス上の
+  // Pointer イベントを、アプリの画面状態（一覧／ボード等）に関わらず無条件に
+  // バッファへ蓄積し続ける。Boot.HandleInput() は _phase == InBoard の
+  // フレームでしかバッファを drain しないため、一覧画面でボタンを押した際の
+  // pointerdown/up がバッファに滞留し、その後ボード画面へ遷移して
+  // _phase == InBoard になった最初のフレームで「古い入力」がそのまま
+  // 新しい画面上の描画として処理されてしまい、遷移直前のボタン座標に
+  // 意図しない点が描かれていた（本番実機で複数回再現）。画面遷移の直前に
+  // C# 側から呼び、その時点で滞留しているイベントを読み捨てる。
+  WB_Input_Flush: function () {
+    var state = window.__wbInput;
+    if (state) {
+      state.buffer.length = 0;
+    }
+  },
 });
