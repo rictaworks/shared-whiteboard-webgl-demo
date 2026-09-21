@@ -48,10 +48,16 @@ module Internal
 
           next unless rate_limit_ok?(raw_op[:session_key], board.id)
 
-          persist_op!(board, raw_op)
+          created = persist_op!(board, raw_op)
+          # seq は既存opの重複であっても必ず消費する（gap検出との整合性のため、
+          # relayのnextSeqとboard.last_seqを一致させ続ける必要がある）。
+          # accepted/op_countは実際に新規作成した場合のみ加算する
+          # （Issue #40：同じop_idが新しいseqで再送された場合の冪等な二重防御）。
           board.last_seq = seq
-          board.op_count += 1
-          accepted += 1
+          if created
+            board.op_count += 1
+            accepted += 1
+          end
         end
 
         board.save!
@@ -114,10 +120,27 @@ module Internal
       render json: { error: "not_owner" }, status: :forbidden
     end
 
+    # 戻り値：新規にBoardOp/Strokeを作成したら true、既に永続化済みの
+    # op_id だったため何もしなかったら false（呼び出し側はこれで op_count の
+    # 二重加算を避ける。board.last_seq は呼び出し側で常に進める）。
     def persist_op!(board, raw_op)
+      op_id = raw_op[:op_id]
+
+      # 実害の修正（2026-09-21・Issue #40）：中継サーバーの op 冪等性
+      # （同じ op_id には同じ seq を返す仕組み）はプロセスメモリ上にしか
+      # 存在せず、永続化されていない。relay が再デプロイされてこのマップが
+      # 空になった状態で、クライアントの未送信キューに残っていた「実は
+      # 既に永続化済みの op」が新しい seq で再送されると、同じ op_id・
+      # 同じ stroke id で2回目の INSERT を試みて UNIQUE 制約違反（500）に
+      # なっていた。relay 側はこれを一時的な失敗とみなして延々とリトライし、
+      # 実際に無限リトライ事故を起こした（タブを閉じても止まらず、relay の
+      # redeploy でようやく収束した）。ここで op_id の重複を検出し、
+      # 冪等に「何もしない」で成功扱いにする。
+      return false if BoardOp.exists?(op_id: op_id, board_id: board.id)
+
       kind = raw_op[:kind]
       op = BoardOp.new(
-        op_id: raw_op[:op_id],
+        op_id: op_id,
         session_id: raw_op[:session_key],
         board_id: board.id,
         seq: raw_op[:seq].to_i,
@@ -128,14 +151,18 @@ module Internal
       case kind
       when "stroke_add"
         stroke_attrs = raw_op[:stroke] || {}
-        stroke = Stroke.create!(
-          id: stroke_attrs[:id],
-          session_id: raw_op[:session_key],
-          board_id: board.id,
-          tool: stroke_attrs[:tool],
-          color: stroke_attrs[:color],
-          width: stroke_attrs[:width]
-        ) { |s| s.point_list = stroke_attrs[:points] || [] }
+        # 上の op_id チェックが通常のケースを弾くため、ここに到達するのは
+        # op_id は異なるのに stroke id だけが衝突するような想定外の経路の
+        # みだが、多重防御として create! ではなく find_or_create_by! にする
+        # （同じ理由で二重INSERTになっても500にしない）。
+        stroke = Stroke.find_or_create_by!(id: stroke_attrs[:id]) do |s|
+          s.session_id = raw_op[:session_key]
+          s.board_id = board.id
+          s.tool = stroke_attrs[:tool]
+          s.color = stroke_attrs[:color]
+          s.point_list = stroke_attrs[:points] || []
+          s.width = stroke_attrs[:width]
+        end
         op.stroke_id = stroke.id
       when "stroke_erase"
         # requirements.md 11.2節：対象が既に消去済みでもエラーにせず、そのまま操作ログに記録する。
@@ -143,6 +170,7 @@ module Internal
       end
 
       op.save!
+      true
     end
 
     def rate_limit_ok?(session_key, board_id)
