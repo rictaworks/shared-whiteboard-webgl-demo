@@ -45,6 +45,36 @@ RSpec.describe "Internal::Boards", type: :request do
       expect(BoardOp.where(board_id: board.id).count).to eq(1)
     end
 
+    it "同じop_idが新しいseqで再送されても500にならず冪等に処理する（Issue #40の回帰テスト）" do
+      # 実機で起きた事故の再現：relay再デプロイでプロセスメモリ上の
+      # op冪等性マップが失われ、クライアントの未送信キューに残っていた
+      # 「既に永続化済みのop」が、中継サーバーによって新しいseqで再送された。
+      # 同じstroke idで2回目のINSERTを試みてUNIQUE制約違反（500）になり、
+      # relayが無限リトライを続ける事故につながった。
+      stroke = { id: "stroke-dup", tool: "pen", color: "#1A1A1A", width: "medium", points: [[0, 0], [10, 10]] }
+      first = { op_id: "op-dup", session_key: session.id, seq: 1, kind: "stroke_add", stroke: stroke }
+      post "/internal/boards/#{board.id}/ops", params: { ops: [first] }, headers: internal_headers, as: :json
+      expect(JSON.parse(response.body)["accepted"]).to eq(1)
+
+      # 別のopを挟んでlast_seqを進める（relay再起動を挟んだ想定）。
+      bump = { op_id: "op-bump", session_key: session.id, seq: 2, kind: "clear" }
+      post "/internal/boards/#{board.id}/ops", params: { ops: [bump] }, headers: internal_headers, as: :json
+      expect(JSON.parse(response.body)["accepted"]).to eq(1)
+
+      # 同じop_id・同じstroke idだが、last_seqより大きい新しいseq(3)で再送される。
+      resend = { op_id: "op-dup", session_key: session.id, seq: 3, kind: "stroke_add", stroke: stroke }
+      post "/internal/boards/#{board.id}/ops", params: { ops: [resend] }, headers: internal_headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)["accepted"]).to eq(0)
+
+      board.reload
+      expect(board.last_seq).to eq(3) # seqは消費されて前進する（gap検出との整合性のため）
+      expect(board.op_count).to eq(2) # op_countは二重加算されない
+      expect(BoardOp.where(op_id: "op-dup").count).to eq(1)
+      expect(Stroke.where(id: "stroke-dup").count).to eq(1)
+    end
+
     it "欠番を検出した場合は409 gap_detectedを返し、書き込まない" do
       op = { op_id: "op-3", session_key: session.id, seq: 3, kind: "clear" }
 
