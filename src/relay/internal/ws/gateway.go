@@ -373,27 +373,38 @@ func (g *Gateway) handleUndoFlag(conn *Connection, h *hub.BoardHub, msg *message
 	}, "")
 
 	sessionKey, boardID := conn.sessionKey, conn.boardID
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), appclient.DefaultTimeout)
-		defer cancel()
-		err := g.appClient.WriteUndoFlag(ctx, boardID, msg.OpID, undone, sessionKey, seq)
-		if err == nil {
-			return
-		}
-		var notOwner *appclient.NotOwnerError
-		if errors.As(err, &notOwner) {
-			// We already broadcast undo_flag_confirmed optimistically
-			// before this call returned. This can only happen when the
-			// target op was already outside our recent buffer (checked
-			// above), so we could not have caught the mismatch locally.
-			// The persisted op log is unaffected (Rails rejected the
-			// write), so the board's source of truth is still correct;
-			// this is a known, accepted demo-scale limitation rather than
-			// a data-integrity bug, and needs no corrective broadcast
-			// (none is defined by the contract).
-			log.Printf("ws: board %s: undo_flag for op %s rejected by Rails as not_owner (target op was outside the relay's recent buffer, so this could not be checked locally): %v", boardID, msg.OpID, err)
-			return
-		}
-		log.Printf("ws: board %s: write_undo_flag failed: %v", boardID, err)
-	}()
+
+	// 実害の修正（2026-09-21・Issue #38）：以前はここを goroutine で
+	// fire-and-forget していたため、Undo 直後に同じ接続から次の op
+	// （例：全消去）が送られると、「Undo の last_seq 反映」と「次の op の
+	// persist.Writer.Flush」の順序が Rails 到達順で保証されず、Rails 側の
+	// last_seq がまだ Undo 前のままの状態で次の op を受け取り、
+	// create_ops のgap検出（本来はクラッシュ等による本物の欠落opの検知用）
+	// が誤発火して以降の op が 409 gap_detected で破棄される事故があった
+	// （全消去がサーバーに保存されない）。この接続の dispatch ループを
+	// 一時的に待たせるだけで他の接続はブロックしない（serve は接続ごとに
+	// 別goroutine）ため、同期化して「この接続内の Undo → 次の op」の順序を
+	// 確定させる。複数参加者が同時にUndoと描画を行う場合の競合は残る
+	// （完全な解消には中継サーバー側でのボード単位の書き込み直列化が要る。
+	// requirements.mdのdemo規模の受容限界として別途記録）。
+	ctx, cancel := context.WithTimeout(context.Background(), appclient.DefaultTimeout)
+	defer cancel()
+	err := g.appClient.WriteUndoFlag(ctx, boardID, msg.OpID, undone, sessionKey, seq)
+	if err == nil {
+		return
+	}
+	var notOwner *appclient.NotOwnerError
+	if errors.As(err, &notOwner) {
+		// We already broadcast undo_flag_confirmed optimistically before
+		// this call returned. This can only happen when the target op was
+		// already outside our recent buffer (checked above), so we could
+		// not have caught the mismatch locally. The persisted op log is
+		// unaffected (Rails rejected the write), so the board's source of
+		// truth is still correct; this is a known, accepted demo-scale
+		// limitation rather than a data-integrity bug, and needs no
+		// corrective broadcast (none is defined by the contract).
+		log.Printf("ws: board %s: undo_flag for op %s rejected by Rails as not_owner (target op was outside the relay's recent buffer, so this could not be checked locally): %v", boardID, msg.OpID, err)
+		return
+	}
+	log.Printf("ws: board %s: write_undo_flag failed: %v", boardID, err)
 }

@@ -89,6 +89,22 @@ module Internal
       return render_not_owner unless op.session_id == params[:session_key].to_s
 
       op.update!(undone: ActiveModel::Type::Boolean.new.cast(params[:undone]))
+
+      # 実害の修正（2026-09-21・Issue #38）：中継サーバーの undo_flag は
+      # ops（stroke_add/stroke_erase/clear）と同じ連番（BoardHub.nextSeq）を
+      # 1つ消費するが（hub.go の AssignUndoSeq）、そのop自体はこのエンドポイント
+      # でのみ扱われ、/internal/boards/:id/ops へは決して送られない。
+      # このエンドポイントは以前 params[:seq]（relayは既に送っていた）を
+      # 一切使っておらず、board.last_seq が undo の分だけ取り残されたまま
+      # 更新されていなかった。その結果、次に届く op の seq が
+      # 「last_seq + 1」より必ず大きくなり、create_ops のgap検出
+      # （本来は relay のクラッシュ等による本物の欠落opを検知するためのもの）が
+      # undo のたびに誤発火し、以降の op が 409 gap_detected で永久に拒否・
+      # 破棄される事故につながっていた（全消去が保存されない等）。
+      # relay から届く seq で last_seq を追随させ、この取り残しを解消する。
+      seq = params[:seq].to_i
+      board.update!(last_seq: seq) if seq > board.last_seq
+
       render json: { ok: true }, status: :ok
     end
 

@@ -19,9 +19,15 @@ namespace Whiteboard.Bridges
         [DllImport("__Internal")]
         private static extern void WB_Input_Capture(int pointerId);
 
+        [DllImport("__Internal")]
+        private static extern void WB_Input_Flush();
+
         public static void Init(string canvasSelector) => WB_Input_Init(canvasSelector);
         public static string Drain() => WB_Input_Drain();
         public static void Capture(int pointerId) => WB_Input_Capture(pointerId);
+        // 実機バグ修正（2026-09-21・Issue #37）：画面遷移の直前に呼び、
+        // 滞留している未処理イベントを読み捨てる。
+        public static void Flush() => WB_Input_Flush();
 #else
         public static void Init(string canvasSelector)
         {
@@ -35,6 +41,11 @@ namespace Whiteboard.Bridges
         }
 
         public static void Capture(int pointerId)
+        {
+            // Editorモック：no-op。
+        }
+
+        public static void Flush()
         {
             // Editorモック：no-op。
         }

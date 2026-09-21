@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -35,10 +36,11 @@ type stubParticipant struct {
 }
 
 type stubBoard struct {
-	mu           sync.Mutex
-	participants map[string]*stubParticipant // session_key -> participant
-	order        []string
-	lastSeq      int // overrides last_seq reported to the relay (0 = "fresh board")
+	mu             sync.Mutex
+	participants   map[string]*stubParticipant // session_key -> participant
+	order          []string
+	lastSeq        int // overrides last_seq reported to the relay (0 = "fresh board")
+	gapDetectedHit int // counts how many times /ops returned 409 gap_detected (Issue #38 regression guard)
 }
 
 type stubRails struct {
@@ -66,6 +68,15 @@ func (s *stubRails) board(token string) *stubBoard {
 // could possibly hold -- i.e. the "outside the buffer" catch-up case.
 func (s *stubRails) setLastSeq(token string, seq int) {
 	s.board(token).lastSeq = seq
+}
+
+// gapDetectedHits reports how many times this board's /ops handler has
+// returned 409 gap_detected across the test so far.
+func (s *stubRails) gapDetectedHits(token string) int {
+	b := s.board(token)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.gapDetectedHit
 }
 
 func (b *stubBoard) verify(sessionKey string) *stubParticipant {
@@ -122,15 +133,66 @@ func newStubServer(t *testing.T, rails *stubRails) *httptest.Server {
 		c.JSON(http.StatusOK, gin.H{"last_seq": seq})
 	})
 
+	// This stub reproduces Rails' real gap-detection behaviour
+	// (src/backend/app/controllers/internal/boards_controller.rb) closely
+	// enough to catch Issue #38: a batch whose lowest seq is more than
+	// lastSeq+1 is rejected with 409 gap_detected, and lastSeq only ever
+	// advances by what /ops and /undo_flag actually tell it (mirroring the
+	// undo_flag fix that makes Rails track the seq undo_flag consumes).
 	r.POST("/internal/boards/:board_id/ops", func(c *gin.Context) {
 		var body struct {
 			Ops []appclient.PersistOp `json:"ops"`
 		}
-		_ = c.BindJSON(&body)
-		c.JSON(http.StatusOK, gin.H{"accepted": len(body.Ops)})
+		if err := c.BindJSON(&body); err != nil || len(body.Ops) == 0 {
+			c.JSON(http.StatusOK, gin.H{"accepted": 0})
+			return
+		}
+		boardID := c.Param("board_id")
+		b := rails.board(boardID)
+		b.mu.Lock()
+		defer b.mu.Unlock()
+
+		// The real Rails controller sorts the batch by seq before walking
+		// it (create_ops: `sorted = incoming_ops.sort_by { |op| op[:seq] }`)
+		// so an out-of-order batch (e.g. from concurrent senders racing
+		// into the same Writer.buf) is still processed correctly. Mirror
+		// that here rather than trusting arrival order.
+		ops := append([]appclient.PersistOp(nil), body.Ops...)
+		sort.Slice(ops, func(i, j int) bool { return ops[i].Seq < ops[j].Seq })
+
+		if ops[0].Seq > b.lastSeq+1 {
+			b.gapDetectedHit++
+			c.JSON(http.StatusConflict, gin.H{"error": "gap_detected", "expected_from": b.lastSeq + 1})
+			return
+		}
+		accepted := 0
+		for _, op := range ops {
+			if op.Seq <= b.lastSeq {
+				continue
+			}
+			if op.Seq > b.lastSeq+1 {
+				b.gapDetectedHit++
+				c.JSON(http.StatusConflict, gin.H{"error": "gap_detected", "expected_from": b.lastSeq + 1})
+				return
+			}
+			b.lastSeq = op.Seq
+			accepted++
+		}
+		c.JSON(http.StatusOK, gin.H{"accepted": accepted})
 	})
 
 	r.POST("/internal/boards/:board_id/undo_flag", func(c *gin.Context) {
+		var body struct {
+			Seq int `json:"seq"`
+		}
+		_ = c.BindJSON(&body)
+		boardID := c.Param("board_id")
+		b := rails.board(boardID)
+		b.mu.Lock()
+		if body.Seq > b.lastSeq {
+			b.lastSeq = body.Seq
+		}
+		b.mu.Unlock()
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
@@ -594,5 +656,49 @@ func TestWS_UndoFlag_OwnerSucceeds(t *testing.T) {
 	typ, _ = observer.readUntil(2*time.Second, "undo_flag_confirmed")
 	if typ != "undo_flag_confirmed" {
 		t.Fatalf("observer: expected undo_flag_confirmed, got %q", typ)
+	}
+}
+
+// TestWS_OpAfterUndo_DoesNotTriggerGapDetected reproduces Issue #38: a
+// stroke, an undo of it, then a further op (mirroring 全消去 pressed right
+// after Undo) must all persist to Rails without a false 409 gap_detected.
+// Before the fix, undo_flag consumed a hub seq that Rails' last_seq never
+// learned about, so this exact sequence always tripped the gap check and
+// the relay's recovery path dropped the batch outright (production data
+// loss, discovered 2026-09-21 on the first deploy where join actually
+// succeeded end-to-end).
+func TestWS_OpAfterUndo_DoesNotTriggerGapDetected(t *testing.T) {
+	relay := newTestRelay(t)
+	client := dial(t, relay)
+	joinAndAccept(t, client, "session-gap-after-undo", "board-gap-after-undo", 0)
+
+	client.send(message.ClientMessage{
+		Type: "op", OpID: "op-gap-1", Kind: "stroke_add",
+		Stroke: &message.Stroke{ID: "s1", Tool: "pen", Color: "#1A1A1A", Width: "medium", Points: []message.Point{{0, 0}, {1, 1}}},
+	})
+	client.readUntil(2*time.Second, "ack")
+
+	undone := true
+	client.send(message.ClientMessage{Type: "undo_flag", OpID: "op-gap-1", Undone: &undone})
+	client.readUntil(2*time.Second, "undo_flag_confirmed")
+
+	client.send(message.ClientMessage{Type: "op", OpID: "op-gap-2", Kind: "clear"})
+	ackTyp, ackRaw := client.readUntil(2*time.Second, "ack")
+	if ackTyp != "ack" {
+		t.Fatalf("expected ack for the op sent after undo, got %q", ackTyp)
+	}
+	ack := decode[message.Ack](t, ackRaw)
+	if ack.OpID != "op-gap-2" {
+		t.Fatalf("ack.OpID = %q, want op-gap-2", ack.OpID)
+	}
+
+	// Give the persist.Writer's periodic flush (200ms) time to reach the
+	// stub Rails, then confirm it landed without ever hitting gap_detected.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if relay.rails.gapDetectedHits("board-gap-after-undo") > 0 {
+			t.Fatalf("op sent after an undo_flag was rejected as gap_detected: undo's seq never reached Rails' last_seq (Issue #38)")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
