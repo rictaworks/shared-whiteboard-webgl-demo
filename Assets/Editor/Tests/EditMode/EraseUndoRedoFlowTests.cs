@@ -118,6 +118,51 @@ namespace Whiteboard.Tests.EditMode
             Assert.IsTrue(state.IsVisible("s1"), "Redoでストロークが復元されること");
         }
 
+        /// <summary>
+        /// 本番実機（2026-09-21）で発見：stroke_add → Undo → Redo → 別のstroke_add →
+        /// Undo → 全消去、という順序で全消去を行うと、最初に描いた（Undo→Redoで復元済みの）
+        /// 線だけが消えずに残る現象を再現する。ConfirmSeq が op.Seq は更新するのに
+        /// _strokeAddSeq/_activeClearSeqs（楽観適用時の"暫定seq"を保持する内部辞書）を
+        /// 更新しないため、本物のサーバーseqではなく暫定値のまま比較され続けることを疑う。
+        /// </summary>
+        [Test]
+        public void ClearAfterUndoRedoInterleaved_HidesTheEarlierRestoredStroke()
+        {
+            var state = new BoardState();
+            var history = new HistoryManager();
+
+            // 1. stroke1を描く（楽観適用：暫定seq=LastSeq=0）→ ackでseq=1に確定。
+            var op1 = DrawStroke(state, history, "s1");
+            state.ConfirmSeq(op1.OpId, 1);
+            Assert.IsTrue(state.IsVisible("s1"), "確定直後は表示されていること");
+
+            // 2. stroke1をUndo（サーバーseq=2）→Redo（サーバーseq=3）。
+            state.ApplyUndoFlag(op1.OpId, true);
+            Assert.IsFalse(state.IsVisible("s1"));
+            state.ApplyUndoFlag(op1.OpId, false);
+            Assert.IsTrue(state.IsVisible("s1"), "Redoで復元されていること");
+
+            // 3. stroke2を描く（楽観適用：暫定seq=LastSeq=1）→ ackでseq=4に確定。
+            var op2 = DrawStroke(state, history, "s2");
+            state.ConfirmSeq(op2.OpId, 4);
+            Assert.IsTrue(state.IsVisible("s2"));
+
+            // 4. stroke2をUndo（サーバーseq=5）。
+            state.ApplyUndoFlag(op2.OpId, true);
+            Assert.IsFalse(state.IsVisible("s2"));
+
+            // 5. 全消去（楽観適用：暫定seq=LastSeq=4）→ ackでseq=6に確定。
+            var clearOp = Op.NewClear(Guid.NewGuid().ToString("N"), "参加者A");
+            history.Record(clearOp);
+            state.ApplyOp(clearOp, state.LastSeq);
+            state.ConfirmSeq(clearOp.OpId, 6);
+
+            // 本番実機での観測：stroke1（サーバーseq=1、全消去seq=6より前）が
+            // 消えずに残ってしまう。
+            Assert.IsFalse(state.IsVisible("s1"),
+                "全消去（サーバーseq=6）はそれより前のstroke1（サーバーseq=1）を消すはず");
+        }
+
         [Test]
         public void UndoThenRedo_AfterRejoin_StillRestoresStroke()
         {
