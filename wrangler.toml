@@ -1,0 +1,24 @@
+# Cloudflare Workers Assets によるフロントエンド配信（Issue #36）。
+#
+# Unity Play は配布 zip 内の index.html を使わず、独自プレイヤーが Build フォルダの
+# ファイルだけを読み込むため、index.html に用意した GA4・デモ一覧への戻りリンク・
+# ご相談ボタン・利用規約への導線・API/WS の URL 注入がすべて無効になっていた
+# （Issue #7 で判明）。加えて参加 URL（?b=<token>）はページ URL から読む設計だが、
+# Unity Play ではゲームがクロスオリジンの iframe で動くため原理的に届かず、
+# 「URL を共有するだけで共同編集できる」という本デモの中核が成立しない（Issue #31）。
+# 自社ホスティングへ移すことでいずれも解消する。
+#
+# 静的配信のみで Worker スクリプトは持たない（API は Railway の backend、
+# WebSocket は Railway の relay が担当する）。
+name = "shared-whiteboard-webgl-demo"
+compatibility_date = "2026-09-21"
+account_id = "9c5183bedab008ccef3581056752fa6f"
+
+[assets]
+# Unity の CLI ビルド（BuildScript.BuildWebGL）の出力先。git 管理外（.gitignore の /Build/）
+# なので、デプロイ前に必ずビルドしてから wrangler deploy する。
+directory = "./Build/WebGL"
+
+[[routes]]
+pattern = "shared-whiteboard-webgl-demo.rictaworks.jp"
+custom_domain = true
