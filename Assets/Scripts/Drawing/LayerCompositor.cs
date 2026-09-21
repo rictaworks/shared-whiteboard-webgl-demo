@@ -117,12 +117,36 @@ namespace Whiteboard.Drawing
             }
         }
 
+        // 実害の修正（2026-09-21・Issue #27/#41の根本原因）：このクラス冒頭のコメントの
+        // とおり、GL.PushMatrix+Graphics.DrawMeshNowの即時モード呼び出しはWebGL実機で
+        // 描画されないことが判明し、Camera.Render()を使う通常の描画経路（DrawMeshInto）へ
+        // 置き換え済みだった。しかしClearTextureだけは同じ「即時モードGL呼び出し」の
+        // 系統（RenderTexture.activeを切り替えてGL.Clearを呼ぶ）のまま残っており、同じ理由で
+        // WebGL実機では反映されないことがある（本番相当環境で実機確認：ボード切り替え直後、
+        // 前のボードで確定済み層に焼き込んだピクセルが新しいボードの空の状態でも画面に残り
+        // 続けた。消しゴムでストロークが消えないという報告も、実際には対象ストローク自体は
+        // 正しく消去されているのに、Rebuild()冒頭のClearTextureが効かず古い描画がそのまま
+        // 残っていたことによる見かけ上の症状だった可能性が高い）。GL.Clearをやめ、他の描画と
+        // 同じCamera.Render()経路（cullingMaskを空にして何も描かず単にクリアする）に統一する。
         private void ClearTexture(RenderTexture rt)
         {
-            var prev = RenderTexture.active;
-            RenderTexture.active = rt;
-            GL.Clear(true, true, new Color(0, 0, 0, 0));
-            RenderTexture.active = prev;
+            EnsureBakeCamera();
+
+            var prevTarget = _bakeCamera.targetTexture;
+            var prevClearFlags = _bakeCamera.clearFlags;
+            var prevBackgroundColor = _bakeCamera.backgroundColor;
+            var prevCullingMask = _bakeCamera.cullingMask;
+
+            _bakeCamera.targetTexture = rt;
+            _bakeCamera.clearFlags = CameraClearFlags.SolidColor;
+            _bakeCamera.backgroundColor = new Color(0, 0, 0, 0);
+            _bakeCamera.cullingMask = 0;
+            _bakeCamera.Render();
+
+            _bakeCamera.targetTexture = prevTarget;
+            _bakeCamera.clearFlags = prevClearFlags;
+            _bakeCamera.backgroundColor = prevBackgroundColor;
+            _bakeCamera.cullingMask = prevCullingMask;
         }
 
         /// <summary>自分の進行中ストロークを毎フレーム描き直す。</summary>
