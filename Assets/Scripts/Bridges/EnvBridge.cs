@@ -29,12 +29,18 @@ namespace Whiteboard.Bridges
         [DllImport("__Internal")]
         private static extern void WB_Env_FocusCanvas();
 
+        [DllImport("__Internal")]
+        private static extern void WB_Env_CopyParticipationUrl(string boardToken);
+
         public static string BoardToken() => WB_Env_BoardToken();
         public static void Init() => WB_Env_Init();
         public static string Drain() => WB_Env_Drain();
         public static void Download(byte[] bytes, string filename) => WB_Env_Download(bytes, bytes?.Length ?? 0, filename);
         public static string RelayWsUrl() => WB_Env_RelayWsUrl();
         public static void FocusCanvas() => WB_Env_FocusCanvas();
+        // 実装（2026-09-21・Issue #31）：結果（成功/失敗）は同期では返らず、
+        // 次回以降の Drain() のイベントキューに copy_succeeded/copy_failed として乗る。
+        public static void CopyParticipationUrl(string boardToken) => WB_Env_CopyParticipationUrl(boardToken ?? "");
 #else
         public static string BoardToken()
         {
@@ -66,6 +72,11 @@ namespace Whiteboard.Bridges
         public static void FocusCanvas()
         {
             // Editorモック：no-op。
+        }
+
+        public static void CopyParticipationUrl(string boardToken)
+        {
+            // Editorモック：no-op。テストでは呼び出しの有無のみ確認する。
         }
 #endif
     }

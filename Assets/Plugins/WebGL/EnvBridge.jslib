@@ -87,6 +87,58 @@ mergeInto(LibraryManager.library, {
     }
   },
 
+  // 実装（2026-09-21・Issue #31）：「参加URLを複製」ボタンが未実装のスタブのまま
+  // 本番に出ていた（コピーもURL組み立ても行わず「URLをコピーしました」とだけ表示）。
+  // Unity Play では?b=形式の参加URLが原理的に機能しなかった（ゲームがクロスオリジン
+  // iframeで動くため）が、Issue #36で自社ホスティングへ移行した今は window.location.origin
+  // が本物のページのオリジンになるため成立する。URLの組み立てとクリップボードへの書き込みを
+  // ここで一括して行い、結果（成功/失敗）を WB_Env_Drain の既存イベントキューに乗せて
+  // C# 側へ非同期に伝える（navigator.clipboard.writeText は Promise を返すため、
+  // この関数自体は同期的な戻り値を返せない）。
+  WB_Env_CopyParticipationUrl: function (boardTokenPtr) {
+    var token = UTF8ToString(boardTokenPtr);
+    if (!window.__wbEnv) {
+      window.__wbEnv = { events: [] };
+    }
+    var state = window.__wbEnv;
+
+    if (!token) {
+      state.events.push({ event: 'copy_failed' });
+      return;
+    }
+
+    var url = window.location.origin + window.location.pathname + '?b=' + encodeURIComponent(token);
+
+    function reportSuccess() { state.events.push({ event: 'copy_succeeded' }); }
+    function reportFailure() { state.events.push({ event: 'copy_failed' }); }
+
+    // navigator.clipboard は安全なコンテキスト（HTTPS or localhost）でのみ使える。
+    // 使えない・失敗した場合は execCommand('copy') へフォールバックする
+    // （非表示のtextareaへ値を入れて選択→コピーという伝統的な手法）。
+    function fallbackCopy() {
+      try {
+        var textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (ok) { reportSuccess(); } else { reportFailure(); }
+      } catch (e) {
+        reportFailure();
+      }
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(reportSuccess, fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
+  },
+
   WB_Env_Download: function (bytesPtr, length, filenamePtr) {
     var filename = UTF8ToString(filenamePtr);
     var buffer = new Uint8Array(length);

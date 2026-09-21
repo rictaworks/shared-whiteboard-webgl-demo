@@ -711,9 +711,16 @@ namespace Whiteboard.Boot
 
         private void OnCopyUrlClicked()
         {
-            // クリップボードへのコピーはブラウザAPI依存のため、EnvBridge経由の実装は将来拡張とする。
-            // 現状はURL文字列を組み立てて状態表示に示す（実機ブラウザでの体験確認は統括側で実施）。
-            _boardView.StatusText.text = "URLをコピーしました";
+            // 実装（2026-09-21・Issue #31）：これまで実際のコピー処理を一切行わず、
+            // 「URLをコピーしました」と表示するだけのスタブだった。Unity Playでは
+            // ?b=形式の参加URLが原理的に機能しなかった（ゲームがクロスオリジンiframeで
+            // 動くため）ため後回しにされていたが、Issue #36で自社ホスティング
+            // （shared-whiteboard-webgl-demo.rictaworks.jp）へ移行した今は
+            // window.location.origin が本物のページのオリジンになるため成立する。
+            // 結果はEnvBridge.Drain()経由で非同期に copy_succeeded/copy_failed として届く
+            // （PumpEnvで処理）。届くまでの間は処理中であることが分かる表示にする。
+            _boardView.StatusText.text = "コピー中…";
+            EnvBridge.CopyParticipationUrl(_boardToken);
         }
 
         private void OnBoardTitleEdited(string newTitle)
@@ -805,6 +812,14 @@ namespace Whiteboard.Boot
                     else if (ev == "pagehide")
                     {
                         _sync?.FlushOnPageHide();
+                    }
+                    else if (ev == "copy_succeeded")
+                    {
+                        _boardView.StatusText.text = "URLをコピーしました";
+                    }
+                    else if (ev == "copy_failed")
+                    {
+                        _boardView.StatusText.text = "コピーに失敗しました";
                     }
                 }
             }
