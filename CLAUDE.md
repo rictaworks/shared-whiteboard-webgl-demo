@@ -49,13 +49,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 層 | 技術 | デプロイ先 | 役割 |
 |---|---|---|---|
-| フロントエンド | Unity WebGL（C#） | Unity Play（無料・手動ZIPアップロード） | 描画・履歴・送信キュー・書き出し |
+| フロントエンド | Unity WebGL（C#） | Cloudflare Workers Assets（`shared-whiteboard-webgl-demo.rictaworks.jp`） | 描画・履歴・送信キュー・書き出し |
 | 入力・通信ブリッジ | jslib（Pointer Events・WebSocket・fetch） | Unity WebGL ビルドに同梱 | ブラウザAPIとC#の橋渡し |
 | 中継 | Gin（Go） | Railway（無料） | WebSocket接続の維持、操作の順序確定と再配信、進行中ストローク・カーソルの配信 |
 | アプリケーション | Rails | Railway（無料・SQLite） | セッション・ボード・参加・操作ログの永続化・所有権検証 |
 
 - 中継層をGoとするのは、1ボードあたり最大10接続へ毎秒数十回の差分を低遅延で再配信する必要があり、CRUD主体ではなく高速並列処理・リアルタイム通信の要件に該当するため（2.2節）。デモ版の簡略構成として他デモで採る「Cloudflare Workers/Pages一本化」はここでは選択しない。
-- デプロイはいずれも人間が手動で行う（Unity Playへのアップロード・Railwayへの`railway up`。root CLAUDE.mdの「デプロイは常にデスクトップから実行」方針に一致）。CI/CDでの自動デプロイは組まない。
+- **フロントエンドは2026-09-21にUnity PlayからCloudflare Workers Assetsへ移行した（Unity Playの公開は削除済み）。** Unity Playは配布zip内の`index.html`を使わず独自プレイヤーが`Build`フォルダのファイルだけを読み込むため、`index.html`に実装済みのGA4計測・デモ一覧への戻りリンク・ご相談ボタン・利用規約導線が常に無効だった。加えて参加URL（`?b=<token>`）はページURLから読む設計のところ、Unity Playではゲームが`play-prod.struckd.com`のクロスオリジンiframeで動くため`?b=`が原理的に到達せず、「URLを共有するだけで共同編集できる」という本デモの中核が成立しなかった（詳細はIssue #36）。デプロイ手順は`wrangler deploy --env production`（Unityビルド後、`Build/WebGL`をアップロード）。このリポジトリ専用のCloudflare APIトークンを使用（他リポジトリと使い回さない。root CLAUDE.mdの「Cloudflare APIトークンの運用ルール」節）。
+- デプロイはいずれも人間が手動で行う（`wrangler deploy`・Railwayへの`railway up`。root CLAUDE.mdの「デプロイは常にデスクトップから実行」方針に一致）。CI/CDでの自動デプロイは組まない。
 - 開発の正は**Windows一本化**（`D:\github\rictaworks\shared-whiteboard-webgl-demo`）。Unity部分はUnity Editor CLIビルドがWindowsローカル前提（`.claude/agents/unity-dev.md`）である一方、Go/Railsは他の同種デモ（questboard・x-follower-gate等）ではWSL2 devcontainerが通例だが、本リポジトリはUnity・Go/Rails混在という初めての構成のため、利用者確認のうえWindows一本化を選択した（2026-09-17）。Go/RailsのローカルDB起動はDocker Desktop for Windowsを想定するが、具体的なcompose構成・コマンドはIssue #1実装時に確定する。
 
 ### 同期の要点（requirements.md 11章が正。多数の要件をまたぐため要約）
@@ -83,7 +84,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **実装方式：1 issue のワンショットで実装する**（requirements.md 27章）。複数Issueに分割しない。
 - ブランチワークフロー：`Assets/**`（Unity）・`src/**`（Go中継・Railsアプリケーション）の変更は main に直接コミット・プッシュせず、必ずブランチを切って `gh pr create` で PR を作成する。それ以外（このファイル・`requirements.md`・`DOCS/`・`SPEC/` 等）は main への直接push を許可する。
 - **AIセッティング（CLAUDE.md本文・`.claude/`配下の設定・エージェント定義等）はPRを作らず、必ずmainブランチで直接コミット・pushすること。** PR化しない。
-- **デモ版のため公開スピードを優先し、正式なcode-review・audit・security-gate・reportを省略してよい**。フローは `issue → setting & coding → security review → add, commit, push → reviewer & pr-checker → merge →（Unity Playへの手動アップロード・Railwayへの手動デプロイ）→ user test` とする（mergeそのものでは本番デプロイされない点が他の一部デモと異なる。上記アーキテクチャ節参照）。
+- **デモ版のため公開スピードを優先し、正式なcode-review・audit・security-gate・reportを省略してよい**。フローは `issue → setting & coding → security review → add, commit, push → reviewer & pr-checker → merge →（Cloudflareへの手動`wrangler deploy`・Railwayへの手動デプロイ）→ user test` とする（mergeそのものでは本番デプロイされない点が他の一部デモと異なる。上記アーキテクチャ節参照）。
 - コミット前に必ずセキュリティレビューを行うこと。マージ前に必ずreviewerとpr-checkerを実行すること（`.claude/agents/` に定義。後述）。
 - TDD厳守：plan → red test → coding → green test。Unity C#はUnity Test Framework（NUnit）、Go/RailsはGo標準テスト／RSpec。フロントの確認（Unity WebGLページ）はPlaywrightで行う。
 - 時刻はJST、エンコードはUTF-8。日本語版のみ開発する（requirements.mdの対象外に多言語化は含まれない。参加者ラベルも「参加者A/B/C」であり氏名の多言語対応は不要）。
